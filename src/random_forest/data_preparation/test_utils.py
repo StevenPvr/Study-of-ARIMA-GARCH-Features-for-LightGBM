@@ -90,6 +90,21 @@ def _check_dataset_length(df_complete: pd.DataFrame, expected_length: int) -> No
 def _check_lag_features_present(df_complete: pd.DataFrame) -> None:
     """Check that lag features are present."""
     assert "weighted_log_return_lag_1" in df_complete.columns
+    assert "weighted_log_return_t" in df_complete.columns
+    assert "weighted_log_return_t_lag_1" not in df_complete.columns
+
+
+def _check_non_observable_columns_removed(
+    df_complete: pd.DataFrame, df_without: pd.DataFrame
+) -> None:
+    """Ensure weighted price columns and their lags are removed."""
+
+    for dataset in (df_complete, df_without):
+        assert "weighted_closing" not in dataset.columns
+        assert "weighted_open" not in dataset.columns
+        for lag in RF_LAG_WINDOWS:
+            assert f"weighted_closing_lag_{lag}" not in dataset.columns
+            assert f"weighted_open_lag_{lag}" not in dataset.columns
 
 
 def _check_insights_removed(df_without: pd.DataFrame) -> None:
@@ -118,9 +133,10 @@ def test_prepare_datasets_includes_lags_and_drops_insights(
 
     df_complete, df_without = prepare_datasets(df=base_df, output_dir=tmp_path)
 
-    expected_length = periods - max(RF_LAG_WINDOWS)
+    expected_length = periods - max(RF_LAG_WINDOWS) - 1
     _check_dataset_length(df_complete, expected_length)
     _check_lag_features_present(df_complete)
+    _check_non_observable_columns_removed(df_complete, df_without)
     _check_insights_removed(df_without)
     _check_output_files_exist(tmp_path)
 

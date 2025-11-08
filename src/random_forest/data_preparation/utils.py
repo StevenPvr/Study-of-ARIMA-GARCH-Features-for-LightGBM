@@ -204,6 +204,42 @@ def _normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     return df_normalized
 
 
+def _create_target_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Create shifted target columns for next-day prediction.
+
+    Args:
+        df: DataFrame containing weighted_log_return and optionally split columns.
+
+    Returns:
+        DataFrame with weighted_log_return shifted to represent J+1 and a
+        weighted_log_return_t column storing the original series.
+
+    Raises:
+        ValueError: If weighted_log_return is missing from the dataframe.
+    """
+
+    if "weighted_log_return" not in df.columns:
+        msg = "Column weighted_log_return is required to create prediction targets"
+        raise ValueError(msg)
+
+    df_shifted = df.copy()
+    df_shifted["weighted_log_return_t"] = df_shifted["weighted_log_return"]
+
+    logger.info("Shifting weighted_log_return to align with next-day target")
+    df_shifted["weighted_log_return"] = df_shifted["weighted_log_return"].shift(-1)
+
+    subset_columns = ["weighted_log_return"]
+
+    if "split" in df_shifted.columns:
+        logger.info("Shifting split column to align with next-day target")
+        df_shifted["split"] = df_shifted["split"].shift(-1)
+        subset_columns.append("split")
+
+    df_shifted = df_shifted.dropna(subset=subset_columns).reset_index(drop=True)
+
+    return df_shifted
+
+
 def _remove_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """Remove rows with missing values and log statistics.
 
@@ -267,6 +303,14 @@ def _get_insight_columns_to_drop(df: pd.DataFrame) -> list[str]:
     lagged_columns_to_drop = _get_lagged_insight_columns(df)
     columns_to_drop.extend(lagged_columns_to_drop)
     return columns_to_drop
+
+
+def _get_non_observable_columns_to_drop() -> list[str]:
+    """Get weighted price columns and their lags to remove before saving datasets."""
+
+    base_columns = ["weighted_closing", "weighted_open"]
+    lagged_columns = [f"{column}_lag_{lag}" for column in base_columns for lag in RF_LAG_WINDOWS]
+    return base_columns + lagged_columns
 
 
 def _get_sigma2_columns_to_drop(df: pd.DataFrame) -> list[str]:
@@ -409,13 +453,22 @@ def prepare_datasets(
 
     df_normalized = _normalize_column_names(df_with_indicators)
 
+    df_shifted = _create_target_columns(df_normalized)
+
+    lag_feature_columns = [col for col in RF_LAG_FEATURE_COLUMNS if col != "weighted_log_return_t"]
     df_with_lags = add_lag_features(
-        df_normalized,
-        feature_columns=RF_LAG_FEATURE_COLUMNS,
+        df_shifted,
+        feature_columns=lag_feature_columns,
         lag_windows=RF_LAG_WINDOWS,
     )
 
     df_clean = _remove_missing_values(df_with_lags)
+
+    non_observable_columns = _get_non_observable_columns_to_drop()
+    columns_to_remove = [col for col in non_observable_columns if col in df_clean.columns]
+    if columns_to_remove:
+        logger.info("Dropping non-observable columns: %s", columns_to_remove)
+        df_clean = df_clean.drop(columns=columns_to_remove)
 
     logger.info("Creating complete dataset with all columns")
     df_complete = df_clean.copy()

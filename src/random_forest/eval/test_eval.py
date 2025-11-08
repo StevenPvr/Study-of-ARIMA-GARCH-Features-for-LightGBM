@@ -46,6 +46,7 @@ def mock_dataset(tmp_path: Path) -> Path:
         {
             "date": pd.date_range("2020-01-01", periods=100),
             "weighted_log_return": np.random.randn(100) * 0.01,
+            "weighted_log_return_t": np.random.randn(100) * 0.01,
             "feature_1": np.random.randn(100),
             "feature_2": np.random.randn(100),
             "feature_3": np.random.randn(100),
@@ -68,7 +69,7 @@ def mock_model(tmp_path: Path) -> tuple[RandomForestRegressor, Path]:
         Tuple of (model, model_path).
     """
     np.random.seed(42)
-    X_train = np.random.randn(100, 3)
+    X_train = np.random.randn(100, 4)
     y_train = np.random.randn(100) * 0.01
 
     model = RandomForestRegressor(n_estimators=10, max_depth=5, random_state=42)
@@ -134,7 +135,7 @@ def test_load_dataset(mock_dataset: Path) -> None:
     X, y = load_dataset(mock_dataset, split="test")
 
     _assert_dataset_structure(X, y, expected_rows=20)
-    assert X.shape[1] == 3  # 3 features
+    assert X.shape[1] == 4  # 4 features (including weighted_log_return_t)
 
 
 def test_load_dataset_train_split(mock_dataset: Path) -> None:

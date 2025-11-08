@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.constants import RF_ARIMA_GARCH_INSIGHT_COLUMNS
+from src.constants import RF_ARIMA_GARCH_INSIGHT_COLUMNS, RF_LAG_WINDOWS
 from src.random_forest.data_preparation.calculs_indicators import (
     add_technical_indicators,
     calculate_bollinger_bands,
@@ -156,11 +156,17 @@ def _check_dataset_structure(df_complete: pd.DataFrame, df_without: pd.DataFrame
 
 
 def _check_weighted_return_removed(df_complete: pd.DataFrame, df_without: pd.DataFrame) -> None:
-    """Check that weighted_return was removed and weighted_log_return exists."""
-    assert "weighted_return" not in df_complete.columns
-    assert "weighted_return" not in df_without.columns
-    assert "weighted_log_return" in df_complete.columns
-    assert "weighted_log_return" in df_without.columns
+    """Check that obsolete columns were removed and targets retained."""
+
+    for dataset in (df_complete, df_without):
+        assert "weighted_return" not in dataset.columns
+        assert "weighted_closing" not in dataset.columns
+        assert "weighted_open" not in dataset.columns
+        assert "weighted_log_return" in dataset.columns
+        assert "weighted_log_return_t" in dataset.columns
+        for lag in RF_LAG_WINDOWS:
+            assert f"weighted_closing_lag_{lag}" not in dataset.columns
+            assert f"weighted_open_lag_{lag}" not in dataset.columns
 
 
 def _check_nan_rows_removed(
@@ -257,6 +263,7 @@ def test_prepare_datasets_without_insight_columns(tmp_path: Path) -> None:
             "date": pd.date_range("2023-01-01", periods=100, freq="D"),
             "weighted_closing": np.random.randn(100),
             "weighted_open": np.random.randn(100),
+            "weighted_log_return": np.random.randn(100) * 0.01,
         }
     )
 
