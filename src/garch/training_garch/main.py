@@ -12,7 +12,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from src.constants import GARCH_DATASET_FILE
-from src.garch.structure_garch.detection import load_garch_dataset
+from src.garch.structure_garch.utils import load_garch_dataset
 from src.garch.training_garch.training import train_egarch_from_dataset
 from src.utils import get_logger
 

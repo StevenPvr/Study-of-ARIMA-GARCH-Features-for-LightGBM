@@ -17,13 +17,14 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from src.garch.training_garch import training as trg
+from src.garch.training_garch import utils as trg_utils
 from src.garch.training_garch.training import (
-    _build_variance_and_std_full,
     attach_outputs_to_dataframe,
     choose_best_fit,
     fit_egarch_candidates,
     train_egarch_from_dataset,
 )
+from src.garch.training_garch.utils import _build_variance_and_std_full
 
 
 def _simulate_garch11(
@@ -106,9 +107,10 @@ def _patch_training_paths(
     var_path = tmp_path / "variance.csv"
 
     monkeypatch.setattr(trg, "GARCH_ESTIMATION_FILE", est_path, raising=True)
-    monkeypatch.setattr(trg, "GARCH_MODEL_FILE", model_path, raising=True)
-    monkeypatch.setattr(trg, "GARCH_MODEL_METADATA_FILE", meta_path, raising=True)
-    monkeypatch.setattr(trg, "GARCH_VARIANCE_OUTPUTS_FILE", var_path, raising=True)
+    monkeypatch.setattr(trg_utils, "GARCH_ESTIMATION_FILE", est_path, raising=True)
+    monkeypatch.setattr(trg_utils, "GARCH_MODEL_FILE", model_path, raising=True)
+    monkeypatch.setattr(trg_utils, "GARCH_MODEL_METADATA_FILE", meta_path, raising=True)
+    monkeypatch.setattr(trg_utils, "GARCH_VARIANCE_OUTPUTS_FILE", var_path, raising=True)
 
     return model_path, meta_path, var_path
 
