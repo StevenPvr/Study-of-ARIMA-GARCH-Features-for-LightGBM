@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+SP_Forecasting/
+venv/
+ENV/
+
+# Data
+data/*.csv
+!data/.gitkeep
+results/
+plots/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Models
+*.joblib
+*.pkl
+*.h5
