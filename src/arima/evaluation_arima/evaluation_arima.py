@@ -132,6 +132,9 @@ def rolling_forecast(
                 )
                 last_refit_len = len(_ensure_supported_forecast_index(current_train))
 
+        if pred is None:
+            msg = f"Forecast failed at step {i + 1}/{len(test_series)}"
+            raise RuntimeError(msg)
         predictions.append(pred)
         current_train = _add_point_to_series(current_train, float(actual), date)
         actuals.append(float(actual))
@@ -215,7 +218,7 @@ def walk_forward_backtest(
         summary[f"{name}_mean"] = float(np.mean(arr))
         summary[f"{name}_std"] = float(np.std(arr, ddof=0))
 
-    logger.info(
+    logger.debug(
         "Completed walk-forward backtest with %s splits (test_size=%s)",
         len(split_metrics),
         test_size,

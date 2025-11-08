@@ -495,8 +495,9 @@ def _build_best_model_dict(model_row: pd.Series) -> dict[str, Any]:
 
     result = _build_model_result_dict(p, d, q, P, D, Q, s, aic_value, bic_value)
     for col in model_row.index:
-        if col.startswith("backtest_"):
-            result[col] = float(model_row[col])
+        col_str = str(col)
+        if col_str.startswith("backtest_"):
+            result[col_str] = float(model_row[col])
     return result
 
 
