@@ -44,6 +44,7 @@ def mock_dataset(tmp_path: Path) -> Path:
         {
             "date": pd.date_range("2020-01-01", periods=100),
             "weighted_log_return": np.random.randn(100) * 0.01,
+            "weighted_log_return_t": np.random.randn(100) * 0.01,
             "feature_1": np.random.randn(100),
             "feature_2": np.random.randn(100),
             "feature_3": np.random.randn(100),
@@ -124,7 +125,7 @@ def test_load_dataset(mock_dataset: Path) -> None:
     assert "split" not in X.columns
     assert "weighted_log_return" not in X.columns
     assert y.name == "weighted_log_return"
-    assert X.shape[1] == 3  # 3 features
+    assert X.shape[1] == 4  # 4 features (including weighted_log_return_t)
 
 
 def test_load_dataset_test_split(mock_dataset: Path) -> None:

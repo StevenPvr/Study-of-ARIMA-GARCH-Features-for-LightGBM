@@ -123,8 +123,6 @@ TIMESERIES_SPLIT_N_SPLITS: int = 2  # Number of splits for TimeSeriesSplit (mini
 RF_LAG_WINDOWS: tuple[int, ...] = (1, 5, 10, 20)
 RF_LAG_FEATURE_COLUMNS: tuple[str, ...] = (
     "weighted_log_return",
-    "weighted_closing",
-    "weighted_open",
     "sigma2_garch",
     "sigma_garch",
     "std_resid_garch",

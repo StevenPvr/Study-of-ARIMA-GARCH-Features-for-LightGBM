@@ -42,6 +42,7 @@ def mock_dataset() -> tuple[pd.DataFrame, pd.Series]:
     n_samples = 100
     X = pd.DataFrame(
         {
+            "weighted_log_return_t": np.random.randn(n_samples),
             "feature1": np.random.randn(n_samples),
             "feature2": np.random.randn(n_samples),
             "feature3": np.random.randn(n_samples),
@@ -67,9 +68,11 @@ def mock_dataset_file(tmp_path: Path) -> Path:
         {
             "date": pd.date_range("2020-01-01", periods=n_samples),
             "weighted_log_return": np.random.randn(n_samples),
+            "weighted_log_return_t": np.random.randn(n_samples),
             "feature1": np.random.randn(n_samples),
             "feature2": np.random.randn(n_samples),
             "feature3": np.random.randn(n_samples),
+            "split": ["train"] * n_samples,
         }
     )
     file_path = tmp_path / "test_dataset.csv"
@@ -88,7 +91,8 @@ def test_load_dataset_success(mock_dataset_file: Path) -> None:
     assert y.name == "weighted_log_return"
     assert "date" not in X.columns
     assert "weighted_log_return" not in X.columns
-    assert list(X.columns) == ["feature1", "feature2", "feature3"]
+    expected_columns = {"weighted_log_return_t", "feature1", "feature2", "feature3"}
+    assert set(X.columns) == expected_columns
 
 
 def test_load_dataset_file_not_found() -> None:
@@ -122,6 +126,7 @@ def test_load_dataset_filters_train_split(tmp_path: Path) -> None:
         {
             "date": pd.date_range("2020-01-01", periods=10),
             "weighted_log_return": np.random.randn(10),
+            "weighted_log_return_t": np.random.randn(10),
             "feature1": np.random.randn(10),
             "split": ["train"] * 6 + ["test"] * 4,
         }
@@ -134,6 +139,7 @@ def test_load_dataset_filters_train_split(tmp_path: Path) -> None:
     assert len(X) == 6  # Only train split
     assert len(y) == 6
     assert "split" not in X.columns
+    assert "weighted_log_return_t" in X.columns
 
 
 def test_walk_forward_cv_score(mock_dataset: tuple[pd.DataFrame, pd.Series]) -> None:
@@ -280,9 +286,11 @@ def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.Monkey
         {
             "date": pd.date_range("2020-01-01", periods=n_samples),
             "weighted_log_return": np.random.randn(n_samples),
+            "weighted_log_return_t": np.random.randn(n_samples),
             "feature1": np.random.randn(n_samples),
             "feature2": np.random.randn(n_samples),
             "feature3": np.random.randn(n_samples),
+            "split": ["train"] * (n_samples - 20) + ["test"] * 20,
         }
     )
 
@@ -302,11 +310,23 @@ def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.Monkey
         dataset_complete,
     )
     monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_DATASET_COMPLETE_FILE",
+        dataset_complete,
+    )
+    monkeypatch.setattr(
         "src.constants.RF_DATASET_WITHOUT_INSIGHTS_FILE",
         dataset_without,
     )
     monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_DATASET_WITHOUT_INSIGHTS_FILE",
+        dataset_without,
+    )
+    monkeypatch.setattr(
         "src.constants.RF_OPTIMIZATION_RESULTS_FILE",
+        tmp_path / "results" / "optimization_results.json",
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_OPTIMIZATION_RESULTS_FILE",
         tmp_path / "results" / "optimization_results.json",
     )
 
