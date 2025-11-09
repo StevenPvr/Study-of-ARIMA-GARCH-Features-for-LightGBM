@@ -12,6 +12,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from src.random_forest.data_preparation.utils import (
+    create_dataset_sigma_plus_base,
     create_dataset_technical_indicators,
     prepare_datasets,
 )
@@ -26,6 +27,9 @@ def main() -> None:
         logger.info("Starting Random Forest data preparation")
         df_complete, df_without_insights = prepare_datasets()
 
+        logger.info("Creating sigma-plus-base dataset")
+        df_sigma_plus_base = create_dataset_sigma_plus_base(include_lags=True)
+
         logger.info("Creating technical indicators dataset")
         df_technical = create_dataset_technical_indicators(include_lags=True)
 
@@ -36,6 +40,10 @@ def main() -> None:
         logger.info(
             f"Dataset without insights: {len(df_without_insights)} rows, "
             f"{len(df_without_insights.columns)} columns"
+        )
+        logger.info(
+            f"Sigma-plus-base dataset: {len(df_sigma_plus_base)} rows, "
+            f"{len(df_sigma_plus_base.columns)} columns"
         )
         logger.info(
             f"Technical indicators dataset: {len(df_technical)} rows, "

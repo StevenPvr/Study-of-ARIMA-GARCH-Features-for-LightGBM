@@ -529,7 +529,11 @@ def _setup_evaluation_paths(
 
     monkeypatch.setattr(eval_module, "RF_DATASET_COMPLETE", mock_dataset)
     monkeypatch.setattr(eval_module, "RF_DATASET_WITHOUT_INSIGHTS", mock_dataset)
-    monkeypatch.setattr(eval_module, "RF_DATASET_SIGMA2_ONLY_FILE", mock_dataset)
+    monkeypatch.setattr(eval_module, "RF_DATASET_SIGMA_PLUS_BASE_FILE", mock_dataset)
+    monkeypatch.setattr(
+        "src.constants.RF_DATASET_SIGMA_PLUS_BASE_FILE",
+        mock_dataset,
+    )
     monkeypatch.setattr(eval_module, "RF_DATASET_RSI14_ONLY_FILE", mock_dataset)
     monkeypatch.setattr(eval_module, "RF_DATASET_TECHNICAL_INDICATORS_FILE", mock_dataset)
     monkeypatch.setattr(eval_module, "RF_MODELS_DIR", model_path.parent)
@@ -556,14 +560,14 @@ def _create_test_models(model: RandomForestRegressor, model_path: Path) -> tuple
     """
     complete_model_path = model_path.parent / "rf_complete.joblib"
     without_model_path = model_path.parent / "rf_without_insights.joblib"
-    sigma2_model_path = model_path.parent / "rf_sigma2_only.joblib"
+    sigma_plus_base_model_path = model_path.parent / "rf_sigma_plus_base.joblib"
     rsi14_model_path = model_path.parent / "rf_rsi14_only.joblib"
     technical_model_path = model_path.parent / "rf_technical_indicators.joblib"
 
     for target_path in [
         complete_model_path,
         without_model_path,
-        sigma2_model_path,
+        sigma_plus_base_model_path,
         rsi14_model_path,
         technical_model_path,
     ]:
@@ -631,7 +635,7 @@ def _verify_evaluation_results(results: dict[str, dict[str, Any]], tmp_path: Pat
     """
     required_models = {"rf_complete", "rf_without_insights"}
     assert required_models <= set(results.keys())
-    optional_models = {"rf_sigma2_only", "rf_rsi14_only", "rf_technical_indicators"}
+    optional_models = {"rf_sigma_plus_base", "rf_rsi14_only", "rf_technical_indicators"}
     assert optional_models <= set(results.keys())
 
     for name, model_results in results.items():

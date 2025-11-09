@@ -9,16 +9,20 @@ import pandas as pd
 
 from src.constants import (
     DATA_DIR,
-    RF_DATASET_TECHNICAL_INDICATORS_FILE,
-    RF_DATASET_SIGMA2_ONLY_FILE,
-    RF_DATASET_RSI14_ONLY_FILE,
     RF_ARIMA_GARCH_INSIGHT_COLUMNS,
+    RF_BASE_FEATURE_COLUMNS,
+    RF_DATASET_RSI14_ONLY_FILE,
+    RF_DATASET_SIGMA_PLUS_BASE_FILE,
+    RF_DATASET_TECHNICAL_INDICATORS_FILE,
     RF_LAG_FEATURE_COLUMNS,
     RF_LAG_WINDOWS,
     RF_TECHNICAL_FEATURE_COLUMNS,
 )
 from src.utils import get_logger
-from src.random_forest.data_preparation.calculs_indicators import add_technical_indicators
+from src.random_forest.data_preparation.calculs_indicators import (
+    add_technical_indicators,
+    calculate_rsi,
+)
 
 
 logger = get_logger(__name__)
@@ -64,6 +68,17 @@ def _log_missing_columns(feature_columns: Sequence[str], df: pd.DataFrame) -> No
     missing_columns = [col for col in feature_columns if col not in df.columns]
     if missing_columns:
         logger.debug("Columns skipped for lagging because they are missing: %s", missing_columns)
+
+
+def _get_base_columns(include_lags: bool) -> list[str]:
+    """Return base feature columns (RSI14) with optional lags."""
+
+    base_cols = list(RF_BASE_FEATURE_COLUMNS)
+    if not include_lags:
+        return base_cols
+
+    lagged = [f"{col}_lag_{lag}" for col in base_cols for lag in RF_LAG_WINDOWS]
+    return base_cols + lagged
 
 
 def _add_lags_for_column(df: pd.DataFrame, column: str, lag_windows: Sequence[int]) -> pd.DataFrame:
@@ -432,88 +447,102 @@ def create_dataset_without_sigma2(
     return df_without_sigma2
 
 
-def create_dataset_sigma2_only(
+def create_dataset_sigma_plus_base(
     df: pd.DataFrame | None = None,
     output_path: Path | None = None,
     *,
     include_lags: bool = True,
 ) -> pd.DataFrame:
-    """Create a dataset that keeps only sigma2_garch and its lags as features.
-
-    This supports a focused ablation: evaluate the predictive power of EGARCH
-    variance alone on `weighted_log_return` at horizon t+1.
-
-    Args:
-        df: Complete dataset. If None, loads from RF_DATASET_COMPLETE_FILE.
-        output_path: Path to save dataset. If None, uses RF_DATASET_SIGMA2_ONLY_FILE.
-        include_lags: If True, also keep sigma2_garch_lag_{k} for k in RF_LAG_WINDOWS.
-            Defaults to True to include all available information.
-
-    Returns:
-        Dataset containing only target columns (date, split, weighted_log_return)
-        plus sigma2_garch and its lags as the sole features.
-    """
-    from src.constants import RF_DATASET_COMPLETE_FILE
+    """Create dataset combining sigma² variance with the common RSI base features."""
 
     if df is None:
-        logger.info(f"Loading complete dataset from {RF_DATASET_COMPLETE_FILE}")
-        df = pd.read_csv(RF_DATASET_COMPLETE_FILE)
+        df = load_garch_data()
 
-    base_cols = ["date", "split", "weighted_log_return"]
-    keep_cols = base_cols + (["sigma2_garch"] if "sigma2_garch" in df.columns else [])
+    df_normalized = _normalize_column_names(df)
+    df_normalized["rsi_14"] = calculate_rsi(
+        cast(pd.Series, df_normalized["weighted_closing"]), period=14
+    )
+    logger.info("RSI-14 calculated for sigma-plus-base dataset")
+
+    df_shifted = _create_target_columns(df_normalized)
 
     if include_lags:
-        for lag in RF_LAG_WINDOWS:
-            col = f"sigma2_garch_lag_{lag}"
-            if col in df.columns:
-                keep_cols.append(col)
+        feature_columns = ["sigma2_garch", *RF_BASE_FEATURE_COLUMNS]
+        df_with_lags = add_lag_features(
+            df_shifted,
+            feature_columns=feature_columns,
+            lag_windows=RF_LAG_WINDOWS,
+        )
+    else:
+        df_with_lags = df_shifted
 
-    missing = [c for c in ["sigma2_garch"] if c not in df.columns]
-    if missing:
-        logger.warning("sigma2_garch not found in dataset; sigma2-only dataset will have no features")
+    non_observable_columns = _get_non_observable_columns_to_drop()
+    columns_to_remove = [col for col in non_observable_columns if col in df_with_lags.columns]
+    if columns_to_remove:
+        logger.info("Dropping non-observable columns: %s", columns_to_remove)
+        df_with_lags = df_with_lags.drop(columns=columns_to_remove)
 
-    # Select and drop any NA rows (to keep alignment with training code expectations)
-    keep_cols = [c for c in keep_cols if c in df.columns]
-    df_sigma2 = cast(pd.DataFrame, df[keep_cols]).dropna().reset_index(drop=True).copy()
+    base_cols = ["date", "split", "weighted_log_return"]
+    keep_cols: list[str] = [col for col in base_cols if col in df_with_lags.columns]
 
-    if output_path is None:
-        output_path = RF_DATASET_SIGMA2_ONLY_FILE
+    if "sigma2_garch" in df_with_lags.columns:
+        keep_cols.append("sigma2_garch")
+    if include_lags:
+        keep_cols.extend(
+            [
+                f"sigma2_garch_lag_{lag}"
+                for lag in RF_LAG_WINDOWS
+                if f"sigma2_garch_lag_{lag}" in df_with_lags.columns
+            ]
+        )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    df_sigma2.to_csv(output_path, index=False)
-    logger.info(
-        "Saved sigma2-only dataset: %s (%d rows, %d columns)", output_path, len(df_sigma2), len(df_sigma2.columns)
+    keep_cols.extend([col for col in _get_base_columns(include_lags) if col in df_with_lags.columns])
+
+    keep_cols = list(dict.fromkeys(keep_cols))
+    df_selected = (
+        cast(pd.DataFrame, df_with_lags[keep_cols])
+        .dropna()
+        .reset_index(drop=True)
+        .copy()
     )
 
-    return df_sigma2
+    if output_path is None:
+        output_path = RF_DATASET_SIGMA_PLUS_BASE_FILE
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df_selected.to_csv(output_path, index=False)
+    logger.info(
+        "Saved sigma-plus-base dataset: %s (%d rows, %d columns)",
+        output_path,
+        len(df_selected),
+        len(df_selected.columns),
+    )
+
+    return df_selected
 
 
-def ensure_sigma2_only_dataset(*, include_lags: bool = True) -> Path:
-    """Ensure the sigma2-only dataset exists; create it if missing.
+def ensure_sigma_plus_base_dataset(*, include_lags: bool = True) -> Path:
+    """Ensure the sigma-plus-base dataset exists; create it if missing."""
 
-    Args:
-        include_lags: If True, include sigma2_garch lag features when available.
-            Defaults to True to include all available information.
-
-    Returns:
-        Path to the sigma2-only dataset.
-    """
-    if RF_DATASET_SIGMA2_ONLY_FILE.exists():
-        # Verify lags exist in the dataset (they should be included by default)
+    dataset_path = RF_DATASET_SIGMA_PLUS_BASE_FILE
+    if dataset_path.exists():
         if include_lags:
-            df_existing = pd.read_csv(RF_DATASET_SIGMA2_ONLY_FILE, nrows=0)  # Read only headers
-            expected_lag_cols = [f"sigma2_garch_lag_{lag}" for lag in RF_LAG_WINDOWS]
-            missing_lags = [col for col in expected_lag_cols if col not in df_existing.columns]
-            if missing_lags:
+            df_existing = pd.read_csv(dataset_path, nrows=0)
+            expected_cols = _get_base_columns(include_lags=True) + [
+                "sigma2_garch",
+                *[f"sigma2_garch_lag_{lag}" for lag in RF_LAG_WINDOWS],
+            ]
+            missing_cols = [col for col in expected_cols if col not in df_existing.columns]
+            if missing_cols:
                 logger.info(
-                    f"Dataset exists but missing lag columns {missing_lags}. "
-                    "Recreating with lags included."
+                    "Sigma-plus-base dataset missing columns %s. Recreating dataset.",
+                    missing_cols,
                 )
-                create_dataset_sigma2_only(include_lags=True)
-        return RF_DATASET_SIGMA2_ONLY_FILE
+                create_dataset_sigma_plus_base(include_lags=True)
+        return dataset_path
 
-    create_dataset_sigma2_only(include_lags=include_lags)
-    return RF_DATASET_SIGMA2_ONLY_FILE
+    create_dataset_sigma_plus_base(include_lags=include_lags)
+    return dataset_path
 
 
 def create_dataset_rsi14_only(
@@ -537,8 +566,6 @@ def create_dataset_rsi14_only(
         Dataset containing only target columns (date, split, weighted_log_return)
         plus rsi_14 and its lags as the sole feature.
     """
-    from src.random_forest.data_preparation.calculs_indicators import calculate_rsi
-
     if df is None:
         df = load_garch_data()
 
@@ -571,12 +598,7 @@ def create_dataset_rsi14_only(
 
     # Select only RSI-related columns
     base_cols = ["date", "split", "weighted_log_return"]
-    keep_cols = base_cols + ["rsi_14"]
-    if include_lags:
-        for lag in RF_LAG_WINDOWS:
-            col = f"rsi_14_lag_{lag}"
-            if col in df_with_lags.columns:
-                keep_cols.append(col)
+    keep_cols = base_cols + [col for col in _get_base_columns(include_lags) if col in df_with_lags.columns]
 
     # Remove missing values
     keep_cols = [c for c in keep_cols if c in df_with_lags.columns]
@@ -608,7 +630,7 @@ def ensure_rsi14_only_dataset(*, include_lags: bool = True) -> Path:
         # Verify lags exist in the dataset (they should be included by default)
         if include_lags:
             df_existing = pd.read_csv(RF_DATASET_RSI14_ONLY_FILE, nrows=0)  # Read only headers
-            expected_lag_cols = [f"rsi_14_lag_{lag}" for lag in RF_LAG_WINDOWS]
+            expected_lag_cols = _get_base_columns(include_lags=True)
             missing_lags = [col for col in expected_lag_cols if col not in df_existing.columns]
             if missing_lags:
                 logger.info(
@@ -729,11 +751,17 @@ def prepare_datasets(
         output_dir = DATA_DIR
 
     df_normalized = _normalize_column_names(df)
+    df_normalized["rsi_14"] = calculate_rsi(
+        cast(pd.Series, df_normalized["weighted_closing"]), period=14
+    )
 
     df_shifted = _create_target_columns(df_normalized)
 
-    # Add lags for GARCH features only (RSI is not included in complete dataset)
     lag_feature_columns = [col for col in RF_LAG_FEATURE_COLUMNS if col != "weighted_log_return_t"]
+    for base_col in RF_BASE_FEATURE_COLUMNS:
+        if base_col not in lag_feature_columns:
+            lag_feature_columns.append(base_col)
+
     df_with_lags = add_lag_features(
         df_shifted,
         feature_columns=lag_feature_columns,

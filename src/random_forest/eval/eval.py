@@ -22,7 +22,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from src.constants import (
     RF_DATASET_COMPLETE_FILE,
     RF_DATASET_WITHOUT_INSIGHTS_FILE,
-    RF_DATASET_SIGMA2_ONLY_FILE,
+    RF_DATASET_SIGMA_PLUS_BASE_FILE,
     RF_DATASET_RSI14_ONLY_FILE,
     RF_DATASET_TECHNICAL_INDICATORS_FILE,
     RF_EVAL_RESAMPLE_FRACTION,
@@ -612,11 +612,11 @@ def _prepare_evaluation_tasks() -> list[tuple[Path, Path, str]]:
             "rf_without_insights",
         ),
     ]
-    # Optional third model: sigma2-only if both dataset and model exist
-    ds_sigma2 = RF_DATASET_SIGMA2_ONLY_FILE
-    model_sigma2 = RF_MODELS_DIR / "rf_sigma2_only.joblib"
-    if ds_sigma2.exists() and model_sigma2.exists():
-        tasks.append((ds_sigma2, model_sigma2, "rf_sigma2_only"))
+    # Optional third model: sigma-plus-base if both dataset and model exist
+    ds_sigma_plus_base = RF_DATASET_SIGMA_PLUS_BASE_FILE
+    model_sigma_plus_base = RF_MODELS_DIR / "rf_sigma_plus_base.joblib"
+    if ds_sigma_plus_base.exists() and model_sigma_plus_base.exists():
+        tasks.append((ds_sigma_plus_base, model_sigma_plus_base, "rf_sigma_plus_base"))
     
     # Optional fourth model: rsi14-only if both dataset and model exist
     ds_rsi14 = RF_DATASET_RSI14_ONLY_FILE
@@ -674,8 +674,8 @@ def _save_evaluation_results(results_dict: dict[str, dict[str, Any]]) -> None:
         "rf_complete": results_dict["rf_complete"],
         "rf_without_insights": results_dict["rf_without_insights"],
     }
-    if "rf_sigma2_only" in results_dict:
-        eval_results["rf_sigma2_only"] = results_dict["rf_sigma2_only"]
+    if "rf_sigma_plus_base" in results_dict:
+        eval_results["rf_sigma_plus_base"] = results_dict["rf_sigma_plus_base"]
     if "rf_rsi14_only" in results_dict:
         eval_results["rf_rsi14_only"] = results_dict["rf_rsi14_only"]
     if "rf_technical_indicators" in results_dict:
@@ -724,7 +724,7 @@ def _log_evaluation_summary(results_dict: dict[str, dict[str, Any]]) -> None:
 
 
 def _log_model_comparison(results_dict: dict[str, dict[str, Any]]) -> None:
-    """Log comparison between rf_complete and rf_without_insights models.
+    """Log comparisons across core Random Forest variants.
 
     Args:
         results_dict: Dictionary mapping model names to results.
@@ -746,6 +746,44 @@ def _log_model_comparison(results_dict: dict[str, dict[str, Any]]) -> None:
     logger.info(f"  MSE difference:  {mse_diff:+.6f} ({'better' if mse_diff < 0 else 'worse'})")
     logger.info(f"  RMSE difference: {rmse_diff:+.6f} ({'better' if rmse_diff < 0 else 'worse'})")
     logger.info(f"  R² difference:   {r2_diff:+.6f} ({'better' if r2_diff > 0 else 'worse'})")
+
+    if "rf_sigma_plus_base" in results_dict:
+        sigma_metrics = results_dict["rf_sigma_plus_base"]["test_metrics"]
+        logger.info("\nComplete vs Sigma-Plus-Base:")
+        logger.info(
+            f"  MAE difference:  {complete_metrics['mae'] - sigma_metrics['mae']:+.6f}"
+            f" ({'better' if complete_metrics['mae'] < sigma_metrics['mae'] else 'worse'})"
+        )
+        logger.info(
+            f"  MSE difference:  {complete_metrics['mse'] - sigma_metrics['mse']:+.6f}"
+            f" ({'better' if complete_metrics['mse'] < sigma_metrics['mse'] else 'worse'})"
+        )
+        logger.info(
+            f"  RMSE difference: {complete_metrics['rmse'] - sigma_metrics['rmse']:+.6f}"
+            f" ({'better' if complete_metrics['rmse'] < sigma_metrics['rmse'] else 'worse'})"
+        )
+        logger.info(
+            f"  R² difference:   {complete_metrics['r2'] - sigma_metrics['r2']:+.6f}"
+            f" ({'better' if complete_metrics['r2'] > sigma_metrics['r2'] else 'worse'})"
+        )
+
+        logger.info("\nWithout Insights vs Sigma-Plus-Base:")
+        logger.info(
+            f"  MAE difference:  {without_metrics['mae'] - sigma_metrics['mae']:+.6f}"
+            f" ({'better' if without_metrics['mae'] < sigma_metrics['mae'] else 'worse'})"
+        )
+        logger.info(
+            f"  MSE difference:  {without_metrics['mse'] - sigma_metrics['mse']:+.6f}"
+            f" ({'better' if without_metrics['mse'] < sigma_metrics['mse'] else 'worse'})"
+        )
+        logger.info(
+            f"  RMSE difference: {without_metrics['rmse'] - sigma_metrics['rmse']:+.6f}"
+            f" ({'better' if without_metrics['rmse'] < sigma_metrics['rmse'] else 'worse'})"
+        )
+        logger.info(
+            f"  R² difference:   {without_metrics['r2'] - sigma_metrics['r2']:+.6f}"
+            f" ({'better' if without_metrics['r2'] > sigma_metrics['r2'] else 'worse'})"
+        )
 
     if "rf_technical_indicators" in results_dict:
         technical_metrics = results_dict["rf_technical_indicators"]["test_metrics"]
@@ -799,13 +837,13 @@ def _perform_statistical_tests(results_dict: dict[str, dict[str, Any]]) -> dict[
     }
 
     # Optional datasets
-    ds_sigma2 = RF_DATASET_SIGMA2_ONLY_FILE
-    model_sigma2 = RF_MODELS_DIR / "rf_sigma2_only.joblib"
-    if ds_sigma2.exists() and model_sigma2.exists():
-        Xs, _ = load_dataset(ds_sigma2, split="test")
-        ms = load_model(model_sigma2)
+    ds_sigma_plus_base = RF_DATASET_SIGMA_PLUS_BASE_FILE
+    model_sigma_plus_base = RF_MODELS_DIR / "rf_sigma_plus_base.joblib"
+    if ds_sigma_plus_base.exists() and model_sigma_plus_base.exists():
+        Xs, _ = load_dataset(ds_sigma_plus_base, split="test")
+        ms = load_model(model_sigma_plus_base)
         ys = ms.predict(Xs)
-        predictions["rf_sigma2_only"] = ys
+        predictions["rf_sigma_plus_base"] = ys
 
     ds_rsi14 = RF_DATASET_RSI14_ONLY_FILE
     model_rsi14 = RF_MODELS_DIR / "rf_rsi14_only.joblib"
@@ -837,11 +875,11 @@ def _perform_statistical_tests(results_dict: dict[str, dict[str, Any]]) -> dict[
         ("rf_complete", "rf_without_insights"),
     ]
 
-    if "rf_sigma2_only" in predictions:
+    if "rf_sigma_plus_base" in predictions:
         comparison_pairs.extend(
             [
-                ("rf_complete", "rf_sigma2_only"),
-                ("rf_without_insights", "rf_sigma2_only"),
+                ("rf_complete", "rf_sigma_plus_base"),
+                ("rf_without_insights", "rf_sigma_plus_base"),
             ]
         )
 
@@ -860,8 +898,8 @@ def _perform_statistical_tests(results_dict: dict[str, dict[str, Any]]) -> dict[
                 ("rf_without_insights", "rf_technical_indicators"),
             ]
         )
-        if "rf_sigma2_only" in predictions:
-            comparison_pairs.append(("rf_sigma2_only", "rf_technical_indicators"))
+        if "rf_sigma_plus_base" in predictions:
+            comparison_pairs.append(("rf_sigma_plus_base", "rf_technical_indicators"))
         if "rf_rsi14_only" in predictions:
             comparison_pairs.append(("rf_rsi14_only", "rf_technical_indicators"))
 
@@ -919,8 +957,8 @@ def run_evaluation() -> dict[str, dict[str, Any]]:
         "rf_without_insights": results_dict["rf_without_insights"],
         "statistical_tests": statistical_tests,
     }
-    if "rf_sigma2_only" in results_dict:
-        eval_results["rf_sigma2_only"] = results_dict["rf_sigma2_only"]
+    if "rf_sigma_plus_base" in results_dict:
+        eval_results["rf_sigma_plus_base"] = results_dict["rf_sigma_plus_base"]
     if "rf_rsi14_only" in results_dict:
         eval_results["rf_rsi14_only"] = results_dict["rf_rsi14_only"]
     if "rf_technical_indicators" in results_dict:

@@ -17,6 +17,7 @@ import pytest
 from src.constants import RF_LAG_WINDOWS, RF_TECHNICAL_FEATURE_COLUMNS
 from src.random_forest.data_preparation.utils import (
     add_lag_features,
+    create_dataset_sigma_plus_base,
     create_dataset_technical_indicators,
     prepare_datasets,
 )
@@ -112,8 +113,8 @@ def _check_output_files_exist(tmp_path: Path) -> None:
 
 
 def test_prepare_datasets_includes_lags_and_drops_insights(tmp_path: Path) -> None:
-    """Verify lag features are created and insight columns removed."""
-    # After processing (RSI is NOT included in complete dataset):
+    """Verify lag features are created, RSI is present, and insight columns removed."""
+    # After processing:
     # 1. Shift removes last row: periods -> periods - 1 rows
     # 2. Lag features with max_lag=20 create NaN for first 20 rows
     # Valid rows start from index max_lag = 20
@@ -121,8 +122,9 @@ def test_prepare_datasets_includes_lags_and_drops_insights(tmp_path: Path) -> No
     # For expected_length=4: (periods - 1) - 20 = 4
     # So: periods = expected_length + max_lag + 1 = 4 + 20 + 1 = 25
     max_lag = max(RF_LAG_WINDOWS)
+    rsi_period = 14
     expected_length = 4
-    periods = expected_length + max_lag + 1
+    periods = expected_length + max_lag + 1 + (rsi_period - 1)
     base_df = _create_base_test_dataframe(periods)
 
     df_complete, df_without = prepare_datasets(df=base_df, output_dir=tmp_path)
@@ -131,6 +133,12 @@ def test_prepare_datasets_includes_lags_and_drops_insights(tmp_path: Path) -> No
     _check_lag_features_present(df_complete)
     _check_non_observable_columns_removed(df_complete, df_without)
     _check_insights_removed(df_without)
+    assert "rsi_14" in df_complete.columns
+    assert "rsi_14" in df_without.columns
+    for lag in RF_LAG_WINDOWS:
+        lag_col = f"rsi_14_lag_{lag}"
+        assert lag_col in df_complete.columns
+        assert lag_col in df_without.columns
     _check_output_files_exist(tmp_path)
 
 
@@ -158,6 +166,26 @@ def test_create_dataset_technical_indicators(tmp_path: Path) -> None:
     # Ensure non-observable columns removed
     assert "weighted_closing" not in df_technical.columns
     assert "weighted_open" not in df_technical.columns
+
+
+def test_create_dataset_sigma_plus_base(tmp_path: Path) -> None:
+    """Verify sigma-plus-base dataset includes sigma² and RSI features with lags."""
+    periods = 70
+    base_df = _create_base_test_dataframe(periods)
+
+    output_path = tmp_path / "rf_dataset_sigma_plus_base.csv"
+    df_sigma_plus_base = create_dataset_sigma_plus_base(
+        df=base_df,
+        output_path=output_path,
+        include_lags=True,
+    )
+
+    assert output_path.exists()
+    assert "sigma2_garch" in df_sigma_plus_base.columns
+    assert "rsi_14" in df_sigma_plus_base.columns
+    for lag in RF_LAG_WINDOWS:
+        assert f"sigma2_garch_lag_{lag}" in df_sigma_plus_base.columns
+        assert f"rsi_14_lag_{lag}" in df_sigma_plus_base.columns
 
 
 if __name__ == "__main__":

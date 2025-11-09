@@ -17,7 +17,7 @@ from src.constants import (
     DEFAULT_RANDOM_STATE,
     RF_DATASET_COMPLETE_FILE,
     RF_DATASET_WITHOUT_INSIGHTS_FILE,
-    RF_DATASET_SIGMA2_ONLY_FILE,
+    RF_DATASET_SIGMA_PLUS_BASE_FILE,
     RF_DATASET_RSI14_ONLY_FILE,
     RF_DATASET_TECHNICAL_INDICATORS_FILE,
     RF_OPTIMIZATION_N_SPLITS,
@@ -26,7 +26,7 @@ from src.constants import (
 )
 from src.utils import get_logger
 from src.random_forest.data_preparation.utils import (
-    ensure_sigma2_only_dataset,
+    ensure_sigma_plus_base_dataset,
     ensure_rsi14_only_dataset,
     ensure_technical_indicators_dataset,
 )
@@ -310,7 +310,7 @@ def save_optimization_results(
     results_without_insights: dict[str, Any],
     output_path: Path = RF_OPTIMIZATION_RESULTS_FILE,
     *,
-    results_sigma2_only: dict[str, Any] | None = None,
+    results_sigma_plus_base: dict[str, Any] | None = None,
     results_rsi14_only: dict[str, Any] | None = None,
     results_technical: dict[str, Any] | None = None,
 ) -> None:
@@ -320,7 +320,7 @@ def save_optimization_results(
         results_complete: Results for complete dataset.
         results_without_insights: Results for dataset without insights.
         output_path: Path to save results JSON file.
-        results_sigma2_only: Optional results for sigma2-only dataset.
+        results_sigma_plus_base: Optional results for sigma-plus-base dataset.
         results_rsi14_only: Optional results for rsi14-only dataset.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,8 +329,8 @@ def save_optimization_results(
         "rf_dataset_complete": results_complete,
         "rf_dataset_without_insights": results_without_insights,
     }
-    if results_sigma2_only is not None:
-        results["rf_dataset_sigma2_only"] = results_sigma2_only
+    if results_sigma_plus_base is not None:
+        results["rf_dataset_sigma_plus_base"] = results_sigma_plus_base
     if results_rsi14_only is not None:
         results["rf_dataset_rsi14_only"] = results_rsi14_only
     if results_technical is not None:
@@ -407,7 +407,7 @@ def _run_parallel_optimizations(
 def _log_optimization_summary(
     results_complete: dict[str, Any],
     results_without: dict[str, Any],
-    results_sigma2_only: dict[str, Any] | None = None,
+    results_sigma_plus_base: dict[str, Any] | None = None,
     results_rsi14_only: dict[str, Any] | None = None,
     results_technical: dict[str, Any] | None = None,
 ) -> None:
@@ -416,7 +416,7 @@ def _log_optimization_summary(
     Args:
         results_complete: Results for complete dataset.
         results_without: Results for dataset without insights.
-        results_sigma2_only: Optional results for sigma2-only dataset.
+        results_sigma_plus_base: Optional results for sigma-plus-base dataset.
         results_rsi14_only: Optional results for rsi14-only dataset.
     """
     logger.info("\n" + "=" * 70)
@@ -430,10 +430,10 @@ def _log_optimization_summary(
     logger.info(f"  Best log loss: {results_without['best_loss']:.6f}")
     logger.info(f"  Best params: {results_without['best_params']}")
 
-    if results_sigma2_only is not None:
-        logger.info("\nSigma2-Only Dataset:")
-        logger.info(f"  Best log loss: {results_sigma2_only['best_loss']:.6f}")
-        logger.info(f"  Best params: {results_sigma2_only['best_params']}")
+    if results_sigma_plus_base is not None:
+        logger.info("\nSigma-Plus-Base Dataset:")
+        logger.info(f"  Best log loss: {results_sigma_plus_base['best_loss']:.6f}")
+        logger.info(f"  Best params: {results_sigma_plus_base['best_params']}")
 
     if results_rsi14_only is not None:
         logger.info("\nRSI14-Only Dataset:")
@@ -464,15 +464,15 @@ def run_optimization(
     logger.info("=" * 70)
     logger.info(f"Running {n_trials} trials per dataset in parallel")
 
-    # Ensure sigma2-only and rsi14-only datasets exist (best possible: include lags)
-    ensure_sigma2_only_dataset(include_lags=True)
+    # Ensure sigma-plus-base and rsi14-only datasets exist (best possible: include lags)
+    ensure_sigma_plus_base_dataset(include_lags=True)
     ensure_rsi14_only_dataset(include_lags=True)
     ensure_technical_indicators_dataset(include_lags=True)
 
     tasks = [
         (RF_DATASET_COMPLETE_FILE, "rf_complete", n_trials),
         (RF_DATASET_WITHOUT_INSIGHTS_FILE, "rf_without_insights", n_trials),
-        (RF_DATASET_SIGMA2_ONLY_FILE, "rf_sigma2_only", n_trials),
+        (RF_DATASET_SIGMA_PLUS_BASE_FILE, "rf_sigma_plus_base", n_trials),
         (RF_DATASET_RSI14_ONLY_FILE, "rf_rsi14_only", n_trials),
         (RF_DATASET_TECHNICAL_INDICATORS_FILE, "rf_technical_indicators", n_trials),
     ]
@@ -481,21 +481,21 @@ def run_optimization(
 
     results_complete = results_dict["rf_complete"]
     results_without = results_dict["rf_without_insights"]
-    results_sigma2 = results_dict.get("rf_sigma2_only")
+    results_sigma_plus_base = results_dict.get("rf_sigma_plus_base")
     results_rsi14 = results_dict.get("rf_rsi14_only")
     results_technical = results_dict.get("rf_technical_indicators")
 
     save_optimization_results(
         results_complete,
         results_without,
-        results_sigma2_only=results_sigma2,
+        results_sigma_plus_base=results_sigma_plus_base,
         results_rsi14_only=results_rsi14,
         results_technical=results_technical,
     )
     _log_optimization_summary(
         results_complete,
         results_without,
-        results_sigma2,
+        results_sigma_plus_base,
         results_rsi14,
         results_technical,
     )

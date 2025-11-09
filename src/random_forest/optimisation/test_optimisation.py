@@ -336,11 +336,11 @@ def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.Monkey
         dataset_without,
     )
     monkeypatch.setattr(
-        "src.constants.RF_DATASET_SIGMA2_ONLY_FILE",
+        "src.constants.RF_DATASET_SIGMA_PLUS_BASE_FILE",
         dataset_complete,
     )
     monkeypatch.setattr(
-        "src.random_forest.optimisation.optimisation.RF_DATASET_SIGMA2_ONLY_FILE",
+        "src.random_forest.optimisation.optimisation.RF_DATASET_SIGMA_PLUS_BASE_FILE",
         dataset_complete,
     )
     monkeypatch.setattr(
@@ -369,7 +369,7 @@ def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.Monkey
         results_output,
     )
     monkeypatch.setattr(
-        "src.random_forest.optimisation.optimisation.ensure_sigma2_only_dataset",
+        "src.random_forest.optimisation.optimisation.ensure_sigma_plus_base_dataset",
         lambda include_lags=True: dataset_complete,
     )
     monkeypatch.setattr(

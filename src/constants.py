@@ -32,7 +32,9 @@ WEIGHTED_LOG_RETURNS_SPLIT_FILE = DATA_DIR / "weighted_log_returns_split.csv"
 RF_DATASET_COMPLETE_FILE = DATA_DIR / "rf_dataset_complete.csv"
 RF_DATASET_WITHOUT_INSIGHTS_FILE = DATA_DIR / "rf_dataset_without_insights.csv"
 RF_DATASET_WITHOUT_SIGMA2_FILE = DATA_DIR / "rf_dataset_without_sigma2.csv"
+# Deprecated alias retained for backward compatibility; prefer RF_DATASET_SIGMA_PLUS_BASE_FILE.
 RF_DATASET_SIGMA2_ONLY_FILE = DATA_DIR / "rf_dataset_sigma2_only.csv"
+RF_DATASET_SIGMA_PLUS_BASE_FILE = DATA_DIR / "rf_dataset_sigma_plus_base.csv"
 RF_DATASET_RSI14_ONLY_FILE = DATA_DIR / "rf_dataset_rsi14_only.csv"
 RF_DATASET_TECHNICAL_INDICATORS_FILE = DATA_DIR / "rf_dataset_technical_indicators.csv"
 
@@ -249,6 +251,7 @@ GARCH_EVAL_HALF: float = 0.5
 
 # Random Forest defaults
 RF_LAG_WINDOWS: tuple[int, ...] = (1, 5, 10, 20)
+RF_BASE_FEATURE_COLUMNS: tuple[str, ...] = ("rsi_14",)
 RF_LAG_FEATURE_COLUMNS: tuple[str, ...] = (
     "weighted_log_return",
     "sigma2_garch",
