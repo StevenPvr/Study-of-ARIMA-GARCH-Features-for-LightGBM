@@ -20,7 +20,7 @@ from src.constants import (
     GARCH_PLOT_Z_CONF,
 )
 from src.garch.garch_params.estimation import egarch11_variance
-from src.garch.structure_garch.detection import load_garch_dataset, prepare_residuals
+from src.garch.structure_garch.utils import load_garch_dataset, prepare_residuals
 from src.utils import get_logger
 
 if TYPE_CHECKING:
