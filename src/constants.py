@@ -51,7 +51,7 @@ ARIMA_EVALUATION_DIR = ARIMA_RESULTS_DIR / "evaluation"
 ARIMA_OUTPUTS_DIR = ARIMA_RESULTS_DIR / "outputs"
 
 # ARIMA optimization files
-SARIMA_BEST_MODELS_FILE = ARIMA_OPTIMIZATION_DIR / "best_models.json"
+SARIMA_BEST_MODELS_FILE = ARIMA_OPTIMIZATION_DIR / "sarima_best_models.json"
 SARIMA_OPTIMIZATION_RESULTS_FILE = ARIMA_OPTIMIZATION_DIR / "optimization_results.csv"
 
 # ARIMA training files

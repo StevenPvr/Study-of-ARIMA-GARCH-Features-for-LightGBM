@@ -382,11 +382,12 @@ def save_evaluation_results(results: dict[str, Any]) -> None:
     if "dates" in results:
         df_dict = {"date": results["dates"], **df_dict}
     predictions_df = pd.DataFrame(df_dict)
+    ROLLING_PREDICTIONS_SARIMA_FILE.parent.mkdir(parents=True, exist_ok=True)
     predictions_df.to_csv(ROLLING_PREDICTIONS_SARIMA_FILE, index=False)
     logger.info(f"Saved predictions: {ROLLING_PREDICTIONS_SARIMA_FILE}")
 
     # Save metrics
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    ROLLING_VALIDATION_METRICS_SARIMA_FILE.parent.mkdir(parents=True, exist_ok=True)
     if "seasonal_order" not in results:
         raise ValueError("Results dictionary must contain 'seasonal_order' key")
 
