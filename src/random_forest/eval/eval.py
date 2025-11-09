@@ -17,12 +17,7 @@ import numpy as np
 import pandas as pd
 import shap
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_absolute_percentage_error,
-    mean_squared_error,
-    r2_score,
-)
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from src.constants import (
     RF_DATASET_COMPLETE_FILE,
@@ -156,20 +151,18 @@ def compute_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
         y_pred: Predicted target values.
 
     Returns:
-        Dictionary with evaluation metrics (MAE, MSE, RMSE, R², MAPE).
+        Dictionary with evaluation metrics (MAE, MSE, RMSE, R²).
     """
     mae = mean_absolute_error(y_true, y_pred)
     mse = mean_squared_error(y_true, y_pred)
     rmse = np.sqrt(mse)
     r2 = r2_score(y_true, y_pred)
-    mape = mean_absolute_percentage_error(y_true, y_pred)
 
     metrics = {
         "mae": float(mae),
         "mse": float(mse),
         "rmse": float(rmse),
         "r2": float(r2),
-        "mape": float(mape),
     }
 
     return metrics
@@ -345,7 +338,6 @@ def _log_model_metrics(model_name: str, metrics: dict[str, float]) -> None:
     logger.info(f"{model_name} - Test MAE: {metrics['mae']:.6f}")
     logger.info(f"{model_name} - Test RMSE: {metrics['rmse']:.6f}")
     logger.info(f"{model_name} - Test R²: {metrics['r2']:.6f}")
-    logger.info(f"{model_name} - Test MAPE: {metrics['mape']:.6f}")
 
 
 def _get_sorted_feature_importances(
@@ -524,7 +516,6 @@ def _log_evaluation_summary(results_dict: dict[str, dict[str, Any]]) -> None:
         logger.info(f"  Test MSE:  {metrics['mse']:.6f}")
         logger.info(f"  Test RMSE: {metrics['rmse']:.6f}")
         logger.info(f"  Test R²:   {metrics['r2']:.6f}")
-        logger.info(f"  Test MAPE: {metrics['mape']:.4%}")
         logger.info(f"  Test size: {res['test_size']}")
         logger.info(f"  SHAP plot: {res['shap_plot_path']}")
 

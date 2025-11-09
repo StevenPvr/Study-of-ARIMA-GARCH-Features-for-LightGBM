@@ -202,7 +202,7 @@ pytest --cov=src
 
 - **ARIMA** : MSE, RMSE, MAE, MAPE, Ljung-Box test
 - **GARCH** : MSE, MAE, QLIKE, MZ regression, VaR coverage
-- **Random Forest** : MSE, RMSE, MAE, MAPE, R², Feature importances, SHAP
+- **Random Forest** : MSE, RMSE, MAE, R², Feature importances, SHAP
 
 ## 📈 Visualisations
 

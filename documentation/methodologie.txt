@@ -395,13 +395,14 @@ Objectif : Évaluer les performances du Random Forest
 Méthodologie :
 - Prédictions sur l'ensemble de test
 - Calcul des métriques :
-  * MSE, RMSE, MAE, MAPE
+  * MSE, RMSE, MAE
   * R² (coefficient de détermination)
+  * L'étude empirique Random Forest se concentre sur ces indicateurs sans MAPE
 - Analyse d'importance des features (feature importance)
 - Analyse SHAP (SHapley Additive exPlanations) pour interprétabilité
 
 Métriques calculées :
-- MSE, RMSE, MAE, MAPE
+- MSE, RMSE, MAE
 - R² score
 - Feature importances
 - SHAP values (pour interprétabilité)
@@ -565,7 +566,7 @@ dans le bon ordre :
 
 9.3 Métriques Random Forest
 -----------------------------
-- MSE, RMSE, MAE, MAPE
+- MSE, RMSE, MAE
 - R² score
 - Log Loss (métrique d'optimisation)
 - Feature importances

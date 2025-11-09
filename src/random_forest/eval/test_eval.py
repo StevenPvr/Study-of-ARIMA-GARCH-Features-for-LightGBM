@@ -193,7 +193,7 @@ def _assert_metrics_present(metrics: dict[str, float]) -> None:
     Args:
         metrics: Dictionary of metrics.
     """
-    required_metrics = ["mae", "mse", "rmse", "r2", "mape"]
+    required_metrics = ["mae", "mse", "rmse", "r2"]
     for metric in required_metrics:
         assert metric in metrics
 
@@ -224,7 +224,7 @@ def _assert_metrics_ranges(metrics: dict[str, float]) -> None:
     Args:
         metrics: Dictionary of metrics.
     """
-    non_negative = ["mae", "mse", "rmse", "mape"]
+    non_negative = ["mae", "mse", "rmse"]
     _assert_non_negative_metrics(metrics, non_negative)
     assert metrics["r2"] <= 1.0
 
@@ -268,7 +268,7 @@ def _assert_perfect_metrics(metrics: dict[str, float]) -> None:
     Args:
         metrics: Dictionary of metrics.
     """
-    zero_metrics = ["mae", "mse", "rmse", "mape"]
+    zero_metrics = ["mae", "mse", "rmse"]
     _assert_zero_metrics(metrics, zero_metrics)
     assert metrics["r2"] == pytest.approx(1.0)
 
