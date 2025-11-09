@@ -108,7 +108,7 @@ def egarch_one_step_variance_forecast(
     Uses ln(sigma2_{t+1}) = omega + beta*ln(sigma2_t) + alpha*(|z_t|-kappa) + gamma*z_t,
     where z_t = e_t / sigma_t and kappa depends on the distribution.
     """
-    from src.garch.garch_params.estimation import _egarch_kappa as eg_kappa
+    from src.garch.garch_params.utils import egarch_kappa as eg_kappa
 
     z_last = float(e_last / np.sqrt(s2_last))
     kappa = eg_kappa(dist, nu, lambda_skew)

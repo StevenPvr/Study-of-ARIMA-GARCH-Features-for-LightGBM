@@ -32,7 +32,7 @@ def _compute_and_save_metrics(  # noqa: PLR0913
     nu: float | None,
     lambda_skew: float | None,
     alphas: list[float],
-    apply_mz_calibration: bool = True,
+    apply_mz_calibration: bool = False,
 ) -> None:
     """Compute and save GARCH evaluation metrics and plots.
 
@@ -45,6 +45,7 @@ def _compute_and_save_metrics(  # noqa: PLR0913
         lambda_skew: Skewness parameter (for Skew-t).
         alphas: VaR alpha levels.
         apply_mz_calibration: Whether to apply MZ calibration to variances.
+            Defaults to False to avoid data leakage. Set to True only for diagnostic purposes.
 
     """
     metrics = compute_classic_metrics_from_artifacts(
@@ -92,19 +93,19 @@ def main() -> None:
     args = parser.parse_args()
 
     logger.info("GARCH evaluation: horizon=%d, level=%.3f", args.horizon, args.level)
-    # Keep MZ calibration for diagnostics only; never for scoring by default
+    # Never use MZ calibration on test data by default to avoid data leakage
     forecast_from_artifacts(
         horizon=int(args.horizon),
         level=float(args.level),
         use_mz_calibration=False,
     )
 
-    # Always compute and save metrics automatically
+    # Always compute and save metrics automatically (without MZ calibration by default)
     try:
         alphas = parse_alphas(args.alphas)
         params, name, dist, nu, lambda_skew = load_best_model()
         _compute_and_save_metrics(
-            params, name, dist, nu, lambda_skew, alphas, apply_mz_calibration=True
+            params, name, dist, nu, lambda_skew, alphas, apply_mz_calibration=False
         )
     except Exception:
         logger.exception("Failed to compute/save GARCH metrics")

@@ -17,11 +17,19 @@ from src.constants import (
     DEFAULT_RANDOM_STATE,
     RF_DATASET_COMPLETE_FILE,
     RF_DATASET_WITHOUT_INSIGHTS_FILE,
+    RF_DATASET_SIGMA2_ONLY_FILE,
+    RF_DATASET_RSI14_ONLY_FILE,
+    RF_DATASET_TECHNICAL_INDICATORS_FILE,
     RF_OPTIMIZATION_N_SPLITS,
     RF_OPTIMIZATION_N_TRIALS,
     RF_OPTIMIZATION_RESULTS_FILE,
 )
 from src.utils import get_logger
+from src.random_forest.data_preparation.utils import (
+    ensure_sigma2_only_dataset,
+    ensure_rsi14_only_dataset,
+    ensure_technical_indicators_dataset,
+)
 
 logger = get_logger(__name__)
 
@@ -202,14 +210,15 @@ def objective(
     Returns:
         Log loss (loss to minimize).
     """
-    # Suggest hyperparameters (conservative ranges for small dataset ~3000 rows)
+    # Suggest hyperparameters (balanced for ~3000 rows with ~11 features)
+    # Based on academic recommendations for small datasets (2024)
     params = {
-        "n_estimators": trial.suggest_int("n_estimators", 50, 200, step=50),
-        "max_depth": trial.suggest_int("max_depth", 5, 15),
-        "min_samples_split": trial.suggest_int("min_samples_split", 5, 15),
-        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 2, 8),
-        "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
-        "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
+        "n_estimators": trial.suggest_int("n_estimators", 50, 200, step=25),
+        "max_depth": trial.suggest_int("max_depth", 3, 8),
+        "min_samples_split": trial.suggest_int("min_samples_split", 2, 10),
+        "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 4),
+        "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2"]),
+        "bootstrap": trial.suggest_categorical("bootstrap", [True]),
     }
 
     # Evaluate with walk-forward CV (with pruning)
@@ -300,6 +309,10 @@ def save_optimization_results(
     results_complete: dict[str, Any],
     results_without_insights: dict[str, Any],
     output_path: Path = RF_OPTIMIZATION_RESULTS_FILE,
+    *,
+    results_sigma2_only: dict[str, Any] | None = None,
+    results_rsi14_only: dict[str, Any] | None = None,
+    results_technical: dict[str, Any] | None = None,
 ) -> None:
     """Save optimization results to JSON file.
 
@@ -307,13 +320,21 @@ def save_optimization_results(
         results_complete: Results for complete dataset.
         results_without_insights: Results for dataset without insights.
         output_path: Path to save results JSON file.
+        results_sigma2_only: Optional results for sigma2-only dataset.
+        results_rsi14_only: Optional results for rsi14-only dataset.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    results = {
+    results: dict[str, Any] = {
         "rf_dataset_complete": results_complete,
         "rf_dataset_without_insights": results_without_insights,
     }
+    if results_sigma2_only is not None:
+        results["rf_dataset_sigma2_only"] = results_sigma2_only
+    if results_rsi14_only is not None:
+        results["rf_dataset_rsi14_only"] = results_rsi14_only
+    if results_technical is not None:
+        results["rf_dataset_technical_indicators"] = results_technical
 
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
@@ -386,12 +407,17 @@ def _run_parallel_optimizations(
 def _log_optimization_summary(
     results_complete: dict[str, Any],
     results_without: dict[str, Any],
+    results_sigma2_only: dict[str, Any] | None = None,
+    results_rsi14_only: dict[str, Any] | None = None,
+    results_technical: dict[str, Any] | None = None,
 ) -> None:
     """Log optimization summary results.
 
     Args:
         results_complete: Results for complete dataset.
         results_without: Results for dataset without insights.
+        results_sigma2_only: Optional results for sigma2-only dataset.
+        results_rsi14_only: Optional results for rsi14-only dataset.
     """
     logger.info("\n" + "=" * 70)
     logger.info("OPTIMIZATION SUMMARY")
@@ -404,13 +430,28 @@ def _log_optimization_summary(
     logger.info(f"  Best log loss: {results_without['best_loss']:.6f}")
     logger.info(f"  Best params: {results_without['best_params']}")
 
+    if results_sigma2_only is not None:
+        logger.info("\nSigma2-Only Dataset:")
+        logger.info(f"  Best log loss: {results_sigma2_only['best_loss']:.6f}")
+        logger.info(f"  Best params: {results_sigma2_only['best_params']}")
+
+    if results_rsi14_only is not None:
+        logger.info("\nRSI14-Only Dataset:")
+        logger.info(f"  Best log loss: {results_rsi14_only['best_loss']:.6f}")
+        logger.info(f"  Best params: {results_rsi14_only['best_params']}")
+
+    if results_technical is not None:
+        logger.info("\nTechnical Indicators Dataset:")
+        logger.info(f"  Best log loss: {results_technical['best_loss']:.6f}")
+        logger.info(f"  Best params: {results_technical['best_params']}")
+
     logger.info("\n" + "=" * 70)
 
 
 def run_optimization(
     n_trials: int = RF_OPTIMIZATION_N_TRIALS,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run hyperparameter optimization for both datasets in parallel.
+    """Run hyperparameter optimization for all datasets in parallel.
 
     Args:
         n_trials: Number of Optuna trials per dataset.
@@ -423,17 +464,40 @@ def run_optimization(
     logger.info("=" * 70)
     logger.info(f"Running {n_trials} trials per dataset in parallel")
 
+    # Ensure sigma2-only and rsi14-only datasets exist (best possible: include lags)
+    ensure_sigma2_only_dataset(include_lags=True)
+    ensure_rsi14_only_dataset(include_lags=True)
+    ensure_technical_indicators_dataset(include_lags=True)
+
     tasks = [
         (RF_DATASET_COMPLETE_FILE, "rf_complete", n_trials),
         (RF_DATASET_WITHOUT_INSIGHTS_FILE, "rf_without_insights", n_trials),
+        (RF_DATASET_SIGMA2_ONLY_FILE, "rf_sigma2_only", n_trials),
+        (RF_DATASET_RSI14_ONLY_FILE, "rf_rsi14_only", n_trials),
+        (RF_DATASET_TECHNICAL_INDICATORS_FILE, "rf_technical_indicators", n_trials),
     ]
 
     results_dict = _run_parallel_optimizations(tasks)
 
     results_complete = results_dict["rf_complete"]
     results_without = results_dict["rf_without_insights"]
+    results_sigma2 = results_dict.get("rf_sigma2_only")
+    results_rsi14 = results_dict.get("rf_rsi14_only")
+    results_technical = results_dict.get("rf_technical_indicators")
 
-    save_optimization_results(results_complete, results_without)
-    _log_optimization_summary(results_complete, results_without)
+    save_optimization_results(
+        results_complete,
+        results_without,
+        results_sigma2_only=results_sigma2,
+        results_rsi14_only=results_rsi14,
+        results_technical=results_technical,
+    )
+    _log_optimization_summary(
+        results_complete,
+        results_without,
+        results_sigma2,
+        results_rsi14,
+        results_technical,
+    )
 
     return results_complete, results_without

@@ -14,8 +14,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.constants import RF_LAG_WINDOWS
-from src.random_forest.data_preparation.utils import add_lag_features, prepare_datasets
+from src.constants import RF_LAG_WINDOWS, RF_TECHNICAL_FEATURE_COLUMNS
+from src.random_forest.data_preparation.utils import (
+    add_lag_features,
+    create_dataset_technical_indicators,
+    prepare_datasets,
+)
 
 
 def _create_test_dataframe() -> pd.DataFrame:
@@ -70,18 +74,6 @@ def _create_base_test_dataframe(periods: int) -> pd.DataFrame:
     )
 
 
-def _fake_add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Fake function to add technical indicators for testing."""
-    augmented = df.copy()
-    augmented["rsi_14"] = np.linspace(30, 70, len(df))
-    augmented["sma_20"] = np.linspace(90, 110, len(df))
-    augmented["ema_20"] = np.linspace(91, 111, len(df))
-    augmented["macd"] = np.linspace(-1, 1, len(df))
-    augmented["macd_signal"] = np.linspace(-0.5, 0.5, len(df))
-    augmented["macd_histogram"] = np.linspace(-0.2, 0.2, len(df))
-    return augmented
-
-
 def _check_dataset_length(df_complete: pd.DataFrame, expected_length: int) -> None:
     """Check that dataset has expected length."""
     assert len(df_complete) == expected_length
@@ -119,26 +111,53 @@ def _check_output_files_exist(tmp_path: Path) -> None:
     assert (tmp_path / "rf_dataset_without_insights.csv").exists()
 
 
-def test_prepare_datasets_includes_lags_and_drops_insights(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_prepare_datasets_includes_lags_and_drops_insights(tmp_path: Path) -> None:
     """Verify lag features are created and insight columns removed."""
-    periods = max(RF_LAG_WINDOWS) + 5
+    # After processing (RSI is NOT included in complete dataset):
+    # 1. Shift removes last row: periods -> periods - 1 rows
+    # 2. Lag features with max_lag=20 create NaN for first 20 rows
+    # Valid rows start from index max_lag = 20
+    # Number of valid rows = (periods - 1) - max_lag
+    # For expected_length=4: (periods - 1) - 20 = 4
+    # So: periods = expected_length + max_lag + 1 = 4 + 20 + 1 = 25
+    max_lag = max(RF_LAG_WINDOWS)
+    expected_length = 4
+    periods = expected_length + max_lag + 1
     base_df = _create_base_test_dataframe(periods)
-
-    monkeypatch.setattr(
-        "src.random_forest.data_preparation.utils.add_technical_indicators",
-        _fake_add_technical_indicators,
-    )
 
     df_complete, df_without = prepare_datasets(df=base_df, output_dir=tmp_path)
 
-    expected_length = periods - max(RF_LAG_WINDOWS) - 1
     _check_dataset_length(df_complete, expected_length)
     _check_lag_features_present(df_complete)
     _check_non_observable_columns_removed(df_complete, df_without)
     _check_insights_removed(df_without)
     _check_output_files_exist(tmp_path)
+
+
+def test_create_dataset_technical_indicators(tmp_path: Path) -> None:
+    """Verify technical indicator dataset includes indicators and lags."""
+    periods = 70
+    base_df = _create_base_test_dataframe(periods)
+
+    output_path = tmp_path / "rf_dataset_technical_indicators.csv"
+    df_technical = create_dataset_technical_indicators(
+        df=base_df,
+        output_path=output_path,
+        include_lags=True,
+    )
+
+    assert output_path.exists()
+    # Ensure base indicator columns exist
+    for indicator in RF_TECHNICAL_FEATURE_COLUMNS:
+        assert indicator in df_technical.columns
+    # Ensure lag columns exist for each indicator
+    for indicator in RF_TECHNICAL_FEATURE_COLUMNS:
+        for lag in RF_LAG_WINDOWS:
+            lag_col = f"{indicator}_lag_{lag}"
+            assert lag_col in df_technical.columns
+    # Ensure non-observable columns removed
+    assert "weighted_closing" not in df_technical.columns
+    assert "weighted_open" not in df_technical.columns
 
 
 if __name__ == "__main__":

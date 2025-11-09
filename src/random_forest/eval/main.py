@@ -22,7 +22,7 @@ def main() -> None:
     logger.info("Starting Random Forest evaluation (test set)")
 
     try:
-        results = run_evaluation()
+        run_evaluation()
 
         logger.info("\n✓ Evaluation completed successfully")
         logger.info(f"Results saved and SHAP plots generated")

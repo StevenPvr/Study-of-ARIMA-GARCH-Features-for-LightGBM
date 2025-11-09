@@ -32,6 +32,9 @@ WEIGHTED_LOG_RETURNS_SPLIT_FILE = DATA_DIR / "weighted_log_returns_split.csv"
 RF_DATASET_COMPLETE_FILE = DATA_DIR / "rf_dataset_complete.csv"
 RF_DATASET_WITHOUT_INSIGHTS_FILE = DATA_DIR / "rf_dataset_without_insights.csv"
 RF_DATASET_WITHOUT_SIGMA2_FILE = DATA_DIR / "rf_dataset_without_sigma2.csv"
+RF_DATASET_SIGMA2_ONLY_FILE = DATA_DIR / "rf_dataset_sigma2_only.csv"
+RF_DATASET_RSI14_ONLY_FILE = DATA_DIR / "rf_dataset_rsi14_only.csv"
+RF_DATASET_TECHNICAL_INDICATORS_FILE = DATA_DIR / "rf_dataset_technical_indicators.csv"
 
 # ============================================================================
 # RESULTS DIRECTORIES - Organized by pipeline step/model
@@ -117,6 +120,7 @@ RF_TRAINING_RESULTS_FILE = RF_TRAINING_DIR / "results.json"
 
 # Random Forest evaluation files
 RF_EVAL_RESULTS_FILE = RF_EVALUATION_DIR / "results.json"
+RF_PERMUTATION_RESULTS_FILE = RF_EVALUATION_DIR / "permutation_importance.json"
 
 # Random Forest ablation files
 RF_ABLATION_SIGMA2_RESULTS_FILE = RF_ABLATION_DIR / "sigma2_results.json"
@@ -176,6 +180,7 @@ GARCH_EVAL_VAR_VIOLATIONS_TEMPLATE = str(GARCH_EVALUATION_PLOTS_DIR / "var_viola
 RF_PLOTS_DIR = PLOTS_DIR / "random_forest"
 RF_CORRELATION_PLOTS_DIR = RF_PLOTS_DIR / "correlation"
 RF_SHAP_PLOTS_DIR = RF_PLOTS_DIR / "shap"
+RF_PERMUTATION_PLOTS_DIR = RF_PLOTS_DIR / "permutation"
 
 # Benchmark plots
 BENCHMARK_PLOTS_DIR = PLOTS_DIR / "benchmark"
@@ -249,12 +254,6 @@ RF_LAG_FEATURE_COLUMNS: tuple[str, ...] = (
     "sigma2_garch",
     "sigma_garch",
     "std_resid_garch",
-    "rsi_14",
-    "sma_20",
-    "ema_20",
-    "macd",
-    "macd_signal",
-    "macd_histogram",
 )
 RF_ARIMA_GARCH_INSIGHT_COLUMNS: tuple[str, ...] = (
     "arima_pred_return",
@@ -266,6 +265,30 @@ RF_ARIMA_GARCH_INSIGHT_COLUMNS: tuple[str, ...] = (
 RF_SHAP_MAX_DISPLAY_DEFAULT: int = 20
 RF_OPTIMIZATION_N_SPLITS: int = 5
 RF_OPTIMIZATION_N_TRIALS: int = 50
+RF_EVAL_RESAMPLE_FRACTION: float = 0.5
+RF_EVAL_RESAMPLE_MIN_SIZE: int = 120
+RF_EVAL_RESAMPLE_N_WINDOWS: int = 5
+RF_TECHNICAL_SMA_WINDOW: int = 20
+RF_TECHNICAL_EMA_SPAN: int = 20
+RF_TECHNICAL_MACD_FAST: int = 12
+RF_TECHNICAL_MACD_SLOW: int = 26
+RF_TECHNICAL_MACD_SIGNAL: int = 9
+RF_TECHNICAL_BB_WINDOW: int = 20
+RF_TECHNICAL_BB_STD: float = 2.0
+RF_TECHNICAL_ROC_PERIOD: int = 10
+RF_TECHNICAL_FEATURE_COLUMNS: tuple[str, ...] = (
+    "rsi_14",
+    "sma_20",
+    "ema_20",
+    "macd_line",
+    "macd_signal",
+    "macd_hist",
+    "bb_middle",
+    "bb_upper",
+    "bb_lower",
+    "bb_bandwidth",
+    "roc_10",
+)
 
 # Benchmark defaults
 DEFAULT_INITIAL_CAPITAL: float = 10_000.0
@@ -308,4 +331,3 @@ DEFAULT_RANDOM_STATE = 42
 DATE_FORMAT_DEFAULT: str = "%Y-%m-%d"
 PLOT_FIGURE_SIZE_DEFAULT: tuple[int, int] = (10, 4)
 PLACEHOLDER_DATE_PREFIX: str = "date_"
-

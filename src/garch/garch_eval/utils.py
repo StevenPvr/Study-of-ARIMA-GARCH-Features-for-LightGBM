@@ -292,7 +292,7 @@ def load_and_prepare_residuals() -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     data = pd.read_csv(GARCH_DATASET_FILE, parse_dates=["date"])  # type: ignore[arg-type]
 
     # Get train residuals for forecast initialization (no data leakage)
-    df_train = data[data["split"] == "train"].copy()
+    df_train = data.loc[data["split"] == "train"].copy()
     resid_train = prepare_residuals(df_train, use_test_only=False)
     resid_train = resid_train[np.isfinite(resid_train)]
 
@@ -555,7 +555,7 @@ def compute_egarch_forecasts(
         Tuple of (one-step forecast, multi-step forecasts array).
 
     """
-    from src.garch.garch_params.estimation import _egarch_kappa as eg_kappa
+    from src.garch.garch_params.utils import egarch_kappa as eg_kappa
 
     # One-step using EGARCH recursion with expected shock terms
     z_last = float(e_last / np.sqrt(s2_last))
@@ -794,7 +794,7 @@ def compute_all_metrics(
     alphas: list[float],
     *,
     lambda_skew: float | None = None,
-    use_mz_calibration: bool = True,
+    use_mz_calibration: bool = False,
 ) -> dict[str, object]:
     """Compute all GARCH evaluation metrics.
 
@@ -806,6 +806,7 @@ def compute_all_metrics(
         nu: Degrees of freedom.
         alphas: VaR alpha levels.
         use_mz_calibration: Whether to apply MZ calibration.
+            Defaults to False to avoid data leakage. Set to True only for diagnostic purposes.
 
     Returns:
     -------
@@ -865,6 +866,12 @@ def apply_mz_calibration_to_forecasts(
     lambda_skew: float | None = None,
 ) -> tuple[float, np.ndarray, float, float]:
     """Apply MZ calibration to variance forecasts.
+
+    WARNING: This function computes MZ calibration parameters using TEST data
+    (via load_test_resid_sigma2). Using calibrated forecasts for evaluation
+    introduces data leakage and invalidates out-of-sample performance metrics.
+    This function should ONLY be used for diagnostic purposes, not for production
+    scoring or model comparison.
 
     Args:
     ----

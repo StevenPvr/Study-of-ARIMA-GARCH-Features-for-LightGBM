@@ -16,6 +16,9 @@ from src.constants import (
     DEFAULT_RANDOM_STATE,
     RF_DATASET_COMPLETE_FILE as RF_DATASET_COMPLETE,
     RF_DATASET_WITHOUT_INSIGHTS_FILE as RF_DATASET_WITHOUT_INSIGHTS,
+    RF_DATASET_SIGMA2_ONLY_FILE as RF_DATASET_SIGMA2_ONLY,
+    RF_DATASET_RSI14_ONLY_FILE as RF_DATASET_RSI14_ONLY,
+    RF_DATASET_TECHNICAL_INDICATORS_FILE as RF_DATASET_TECHNICAL,
     RF_MODELS_DIR,
     RF_OPTIMIZATION_RESULTS_FILE,
     RF_TRAINING_RESULTS_FILE,
@@ -313,7 +316,7 @@ def _prepare_training_tasks(
     Returns:
         List of (dataset_path, model_name, params) tuples.
     """
-    return [
+    tasks: list[tuple[Path, str, dict[str, Any]]] = [
         (
             RF_DATASET_COMPLETE,
             "rf_complete",
@@ -325,6 +328,33 @@ def _prepare_training_tasks(
             opt_results["rf_dataset_without_insights"]["best_params"],
         ),
     ]
+    # Optional task: sigma2-only if present in optimization results
+    if "rf_dataset_sigma2_only" in opt_results:
+        tasks.append(
+            (
+                RF_DATASET_SIGMA2_ONLY,
+                "rf_sigma2_only",
+                opt_results["rf_dataset_sigma2_only"]["best_params"],
+            )
+        )
+    # Optional task: rsi14-only if present in optimization results
+    if "rf_dataset_rsi14_only" in opt_results:
+        tasks.append(
+            (
+                RF_DATASET_RSI14_ONLY,
+                "rf_rsi14_only",
+                opt_results["rf_dataset_rsi14_only"]["best_params"],
+            )
+        )
+    if "rf_dataset_technical_indicators" in opt_results:
+        tasks.append(
+            (
+                RF_DATASET_TECHNICAL,
+                "rf_technical_indicators",
+                opt_results["rf_dataset_technical_indicators"]["best_params"],
+            )
+        )
+    return tasks
 
 
 def _run_parallel_training(
@@ -373,8 +403,14 @@ def _save_training_results(
         "rf_complete": results_dict["rf_complete"],
         "rf_without_insights": results_dict["rf_without_insights"],
     }
+    if "rf_sigma2_only" in results_dict:
+        training_results["rf_sigma2_only"] = results_dict["rf_sigma2_only"]
+    if "rf_rsi14_only" in results_dict:
+        training_results["rf_rsi14_only"] = results_dict["rf_rsi14_only"]
+    if "rf_technical_indicators" in results_dict:
+        training_results["rf_technical_indicators"] = results_dict["rf_technical_indicators"]
 
-    RF_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    RF_TRAINING_RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(RF_TRAINING_RESULTS_FILE, "w") as f:
         json.dump(training_results, f, indent=2)
 
@@ -427,7 +463,14 @@ def run_training(
     _save_training_results(results_dict)
     _log_training_summary(results_dict)
 
-    return {
+    out = {
         "rf_complete": results_dict["rf_complete"],
         "rf_without_insights": results_dict["rf_without_insights"],
     }
+    if "rf_sigma2_only" in results_dict:
+        out["rf_sigma2_only"] = results_dict["rf_sigma2_only"]
+    if "rf_rsi14_only" in results_dict:
+        out["rf_rsi14_only"] = results_dict["rf_rsi14_only"]
+    if "rf_technical_indicators" in results_dict:
+        out["rf_technical_indicators"] = results_dict["rf_technical_indicators"]
+    return out

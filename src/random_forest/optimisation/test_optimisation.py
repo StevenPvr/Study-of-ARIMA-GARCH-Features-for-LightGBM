@@ -263,7 +263,19 @@ def test_save_optimization_results(tmp_path: Path) -> None:
     }
 
     output_file = tmp_path / "results" / "optimization_results.json"
-    save_optimization_results(results_complete, results_without, output_file)
+    results_technical = {
+        "best_params": {"n_estimators": 75},
+        "best_loss": 0.55,
+        "n_trials": 10,
+        "study_name": "test_technical",
+    }
+
+    save_optimization_results(
+        results_complete,
+        results_without,
+        output_file,
+        results_technical=results_technical,
+    )
 
     assert output_file.exists()
 
@@ -272,8 +284,10 @@ def test_save_optimization_results(tmp_path: Path) -> None:
 
     assert "rf_dataset_complete" in saved_data
     assert "rf_dataset_without_insights" in saved_data
+    assert "rf_dataset_technical_indicators" in saved_data
     assert saved_data["rf_dataset_complete"] == results_complete
     assert saved_data["rf_dataset_without_insights"] == results_without
+    assert saved_data["rf_dataset_technical_indicators"] == results_technical
 
 
 def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,12 +336,49 @@ def test_run_optimization_integration(tmp_path: Path, monkeypatch: pytest.Monkey
         dataset_without,
     )
     monkeypatch.setattr(
+        "src.constants.RF_DATASET_SIGMA2_ONLY_FILE",
+        dataset_complete,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_DATASET_SIGMA2_ONLY_FILE",
+        dataset_complete,
+    )
+    monkeypatch.setattr(
+        "src.constants.RF_DATASET_RSI14_ONLY_FILE",
+        dataset_without,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_DATASET_RSI14_ONLY_FILE",
+        dataset_without,
+    )
+    monkeypatch.setattr(
+        "src.constants.RF_DATASET_TECHNICAL_INDICATORS_FILE",
+        dataset_without,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.RF_DATASET_TECHNICAL_INDICATORS_FILE",
+        dataset_without,
+    )
+    results_output = tmp_path / "results" / "optimization_results.json"
+    monkeypatch.setattr(
         "src.constants.RF_OPTIMIZATION_RESULTS_FILE",
-        tmp_path / "results" / "optimization_results.json",
+        results_output,
     )
     monkeypatch.setattr(
         "src.random_forest.optimisation.optimisation.RF_OPTIMIZATION_RESULTS_FILE",
-        tmp_path / "results" / "optimization_results.json",
+        results_output,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.ensure_sigma2_only_dataset",
+        lambda include_lags=True: dataset_complete,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.ensure_rsi14_only_dataset",
+        lambda include_lags=True: dataset_without,
+    )
+    monkeypatch.setattr(
+        "src.random_forest.optimisation.optimisation.ensure_technical_indicators_dataset",
+        lambda include_lags=True: dataset_without,
     )
 
     # Run optimization with fewer trials for speed

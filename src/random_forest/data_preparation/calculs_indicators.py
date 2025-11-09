@@ -6,6 +6,16 @@ from typing import cast
 
 import pandas as pd
 
+from src.constants import (
+    RF_TECHNICAL_BB_STD,
+    RF_TECHNICAL_BB_WINDOW,
+    RF_TECHNICAL_EMA_SPAN,
+    RF_TECHNICAL_MACD_FAST,
+    RF_TECHNICAL_MACD_SIGNAL,
+    RF_TECHNICAL_MACD_SLOW,
+    RF_TECHNICAL_ROC_PERIOD,
+    RF_TECHNICAL_SMA_WINDOW,
+)
 from src.utils import get_logger
 
 logger = get_logger(__name__)
@@ -34,106 +44,94 @@ def calculate_rsi(prices: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
-def calculate_sma(prices: pd.Series, period: int = 20) -> pd.Series:
-    """Calculate Simple Moving Average (SMA).
-
-    Args:
-        prices: Series of prices.
-        period: Period for SMA calculation (default: 20).
-
-    Returns:
-        Series with SMA values.
-    """
-    sma = cast(pd.Series, prices.rolling(window=period, min_periods=period).mean())
-    return sma
+def calculate_sma(prices: pd.Series, window: int) -> pd.Series:
+    """Calculate Simple Moving Average (SMA)."""
+    return cast(pd.Series, prices.rolling(window=window, min_periods=window).mean())
 
 
-def calculate_ema(prices: pd.Series, period: int = 20) -> pd.Series:
-    """Calculate Exponential Moving Average (EMA).
-
-    Args:
-        prices: Series of prices.
-        period: Period for EMA calculation (default: 20).
-
-    Returns:
-        Series with EMA values.
-    """
-    ema = cast(pd.Series, prices.ewm(span=period, adjust=False, min_periods=period).mean())
-    return ema
+def calculate_ema(prices: pd.Series, span: int) -> pd.Series:
+    """Calculate Exponential Moving Average (EMA)."""
+    return cast(pd.Series, prices.ewm(span=span, adjust=False).mean())
 
 
 def calculate_macd(
-    prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Calculate MACD (Moving Average Convergence Divergence).
-
-    Args:
-        prices: Series of closing prices.
-        fast: Fast EMA period (default: 12).
-        slow: Slow EMA period (default: 26).
-        signal: Signal line EMA period (default: 9).
-
-    Returns:
-        Tuple of (MACD line, signal line, histogram).
-    """
-    ema_fast = calculate_ema(prices, period=fast)
-    ema_slow = calculate_ema(prices, period=slow)
+    prices: pd.Series,
+    *,
+    fast: int,
+    slow: int,
+    signal: int,
+) -> pd.DataFrame:
+    """Calculate MACD line, signal line, and histogram."""
+    ema_fast = calculate_ema(prices, span=fast)
+    ema_slow = calculate_ema(prices, span=slow)
     macd_line = ema_fast - ema_slow
-    signal_line = calculate_ema(macd_line, period=signal)
-    histogram = macd_line - signal_line
+    macd_signal = calculate_ema(macd_line, span=signal)
+    macd_hist = macd_line - macd_signal
 
-    return macd_line, signal_line, histogram
+    return pd.DataFrame(
+        {
+            "macd_line": macd_line,
+            "macd_signal": macd_signal,
+            "macd_hist": macd_hist,
+        }
+    )
 
 
 def calculate_bollinger_bands(
-    prices: pd.Series, period: int = 20, num_std: float = 2.0
-) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """Calculate Bollinger Bands.
+    prices: pd.Series,
+    *,
+    window: int,
+    num_std: float,
+) -> pd.DataFrame:
+    """Calculate Bollinger Bands."""
+    middle = cast(pd.Series, prices.rolling(window=window, min_periods=window).mean())
+    rolling_std = prices.rolling(window=window, min_periods=window).std(ddof=0)
+    upper = middle + num_std * rolling_std
+    lower = middle - num_std * rolling_std
+    bandwidth = (upper - lower) / middle.replace(0.0, pd.NA)
 
-    Args:
-        prices: Series of closing prices.
-        period: Period for moving average (default: 20).
-        num_std: Number of standard deviations (default: 2.0).
+    return pd.DataFrame(
+        {
+            "bb_middle": middle,
+            "bb_upper": upper,
+            "bb_lower": lower,
+            "bb_bandwidth": bandwidth,
+        }
+    )
 
-    Returns:
-        Tuple of (upper band, middle band, lower band).
-    """
-    sma = calculate_sma(prices, period=period)
-    std = prices.rolling(window=period, min_periods=period).std()
-    upper_band = sma + (std * num_std)
-    lower_band = sma - (std * num_std)
 
-    return upper_band, sma, lower_band
+def calculate_rate_of_change(prices: pd.Series, period: int) -> pd.Series:
+    """Calculate Rate of Change (ROC) indicator."""
+    previous = cast(pd.Series, prices.shift(period))
+    roc = (prices - previous) / previous.replace(0.0, pd.NA)
+    return cast(pd.Series, roc)
 
 
 def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Add technical indicators to DataFrame.
-
-    Calculates RSI, SMA, EMA, and MACD using closing prices.
-
-    Args:
-        df: DataFrame with columns including 'weighted_closing'.
-
-    Returns:
-        DataFrame with added technical indicator columns.
-    """
+    """Add technical indicators to DataFrame."""
     df = df.copy()
     close = cast(pd.Series, df["weighted_closing"])
 
-    # RSI (14 days)
     df["rsi_14"] = calculate_rsi(close, period=14)
+    df["sma_20"] = calculate_sma(close, window=RF_TECHNICAL_SMA_WINDOW)
+    df["ema_20"] = calculate_ema(close, span=RF_TECHNICAL_EMA_SPAN)
 
-    # Simple Moving Average (20 days)
-    df["sma_20"] = calculate_sma(close, period=20)
+    macd_df = calculate_macd(
+        close,
+        fast=RF_TECHNICAL_MACD_FAST,
+        slow=RF_TECHNICAL_MACD_SLOW,
+        signal=RF_TECHNICAL_MACD_SIGNAL,
+    )
+    df = df.join(macd_df)
 
-    # Exponential Moving Average (20 days)
-    df["ema_20"] = calculate_ema(close, period=20)
+    bb_df = calculate_bollinger_bands(
+        close,
+        window=RF_TECHNICAL_BB_WINDOW,
+        num_std=RF_TECHNICAL_BB_STD,
+    )
+    df = df.join(bb_df)
 
-    # MACD (12, 26, 9)
-    macd_line, signal_line, histogram = calculate_macd(close, fast=12, slow=26, signal=9)
-    df["macd"] = macd_line
-    df["macd_signal"] = signal_line
-    df["macd_histogram"] = histogram
+    df["roc_10"] = calculate_rate_of_change(close, period=RF_TECHNICAL_ROC_PERIOD)
 
     logger.info("Technical indicators added successfully")
     return df

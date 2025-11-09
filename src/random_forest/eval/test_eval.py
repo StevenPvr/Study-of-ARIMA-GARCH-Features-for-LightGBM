@@ -69,8 +69,16 @@ def mock_model(tmp_path: Path) -> tuple[RandomForestRegressor, Path]:
         Tuple of (model, model_path).
     """
     np.random.seed(42)
-    X_train = np.random.randn(100, 4)
-    y_train = np.random.randn(100) * 0.01
+    # Use DataFrame with named columns to match test data format
+    X_train = pd.DataFrame(
+        {
+            "weighted_log_return_t": np.random.randn(100) * 0.01,
+            "feature_1": np.random.randn(100),
+            "feature_2": np.random.randn(100),
+            "feature_3": np.random.randn(100),
+        }
+    )
+    y_train = pd.Series(np.random.randn(100) * 0.01, name="weighted_log_return")
 
     model = RandomForestRegressor(n_estimators=10, max_depth=5, random_state=42)
     model.fit(X_train, y_train)
@@ -337,8 +345,10 @@ def test_compute_shap_values(
     model, _ = mock_model
 
     np.random.seed(42)
+    # Use same columns as the model was trained on
     X = pd.DataFrame(
         {
+            "weighted_log_return_t": np.random.randn(50) * 0.01,
             "feature_1": np.random.randn(50),
             "feature_2": np.random.randn(50),
             "feature_3": np.random.randn(50),
@@ -416,6 +426,26 @@ def _assert_evaluation_metrics(results: dict[str, Any]) -> None:
     _assert_metrics_present(metrics)
 
 
+def _assert_resampled_metrics_structure(resampled: dict[str, Any]) -> None:
+    """Assert resampled evaluation metrics structure."""
+    assert "runs" in resampled
+    assert "summary" in resampled
+
+    runs = resampled["runs"]
+    assert runs, "Expected at least one resampled run"
+
+    for run in runs:
+        assert "metrics" in run
+        assert "n_samples" in run
+        assert run["n_samples"] > 0
+        _assert_metrics_present(run["metrics"])
+
+    summary = resampled["summary"]
+    if summary:
+        for stats in summary.values():
+            assert {"mean", "std", "min", "max"} <= set(stats.keys())
+
+
 def test_evaluate_model(
     mock_model: tuple[RandomForestRegressor, Path],
     mock_dataset: Path,
@@ -438,6 +468,27 @@ def test_evaluate_model(
     assert len(results["feature_importances"]) == X_test.shape[1]
 
 
+def test_evaluate_model_without_shap(
+    mock_model: tuple[RandomForestRegressor, Path],
+    mock_dataset: Path,
+) -> None:
+    """Test evaluating model without computing SHAP values."""
+    model, _ = mock_model
+    X_test, y_test = load_dataset(mock_dataset, split="test")
+
+    results = evaluate_model(
+        model,
+        X_test,
+        y_test,
+        "test_model_no_shap",
+        compute_shap=False,
+    )
+
+    _assert_evaluation_results_structure(results, "test_model_no_shap")
+    _assert_evaluation_metrics(results)
+    assert results["shap_plot_path"] is None
+
+
 def test_run_single_evaluation(
     mock_dataset: Path,
     mock_model: tuple[RandomForestRegressor, Path],
@@ -456,6 +507,8 @@ def test_run_single_evaluation(
     assert model_name == "test_model"
     _assert_evaluation_results_structure(results, "test_model")
     _assert_shap_plot_in_results(results, tmp_path)
+    assert "resampled_metrics" in results
+    _assert_resampled_metrics_structure(results["resampled_metrics"])
 
 
 def _setup_evaluation_paths(
@@ -476,10 +529,19 @@ def _setup_evaluation_paths(
 
     monkeypatch.setattr(eval_module, "RF_DATASET_COMPLETE", mock_dataset)
     monkeypatch.setattr(eval_module, "RF_DATASET_WITHOUT_INSIGHTS", mock_dataset)
+    monkeypatch.setattr(eval_module, "RF_DATASET_SIGMA2_ONLY_FILE", mock_dataset)
+    monkeypatch.setattr(eval_module, "RF_DATASET_RSI14_ONLY_FILE", mock_dataset)
+    monkeypatch.setattr(eval_module, "RF_DATASET_TECHNICAL_INDICATORS_FILE", mock_dataset)
     monkeypatch.setattr(eval_module, "RF_MODELS_DIR", model_path.parent)
     monkeypatch.setattr(eval_module, "RF_RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(eval_module, "RF_EVAL_RESULTS_FILE", tmp_path / "eval_results.json")
     monkeypatch.setattr(eval_module, "RF_SHAP_PLOTS_DIR", tmp_path / "shap")
+    monkeypatch.setattr(eval_module, "RF_PERMUTATION_RESULTS_FILE", tmp_path / "perm.json")
+
+    from src.random_forest.eval import permutation as permutation_module
+
+    monkeypatch.setattr(permutation_module, "RF_PERMUTATION_RESULTS_FILE", tmp_path / "perm.json")
+    monkeypatch.setattr(permutation_module, "RF_PERMUTATION_PLOTS_DIR", tmp_path / "perm_plots")
 
 
 def _create_test_models(model: RandomForestRegressor, model_path: Path) -> tuple[Path, Path]:
@@ -494,8 +556,19 @@ def _create_test_models(model: RandomForestRegressor, model_path: Path) -> tuple
     """
     complete_model_path = model_path.parent / "rf_complete.joblib"
     without_model_path = model_path.parent / "rf_without_insights.joblib"
-    joblib.dump(model, complete_model_path)
-    joblib.dump(model, without_model_path)
+    sigma2_model_path = model_path.parent / "rf_sigma2_only.joblib"
+    rsi14_model_path = model_path.parent / "rf_rsi14_only.joblib"
+    technical_model_path = model_path.parent / "rf_technical_indicators.joblib"
+
+    for target_path in [
+        complete_model_path,
+        without_model_path,
+        sigma2_model_path,
+        rsi14_model_path,
+        technical_model_path,
+    ]:
+        joblib.dump(model, target_path)
+
     return complete_model_path, without_model_path
 
 
@@ -510,6 +583,8 @@ def _assert_model_results_structure(results: dict[str, Any], model_name: str) ->
     assert "test_size" in results
     assert "n_features" in results
     assert "feature_importances" in results
+    assert "resampled_metrics" in results
+    _assert_resampled_metrics_structure(results["resampled_metrics"])
 
 
 def _assert_model_shap_plot(results: dict[str, Any], model_name: str, tmp_path: Path) -> None:
@@ -541,6 +616,10 @@ def _assert_saved_evaluation_results(tmp_path: Path) -> None:
         saved_results = json.load(f)
     assert "rf_complete" in saved_results
     assert "rf_without_insights" in saved_results
+    for name, res in saved_results.items():
+        if name == "statistical_tests":
+            continue
+        assert "resampled_metrics" in res
 
 
 def _verify_evaluation_results(results: dict[str, dict[str, Any]], tmp_path: Path) -> None:
@@ -550,10 +629,14 @@ def _verify_evaluation_results(results: dict[str, dict[str, Any]], tmp_path: Pat
         results: Evaluation results dictionary.
         tmp_path: Temporary directory path.
     """
-    assert "rf_complete" in results
-    assert "rf_without_insights" in results
+    required_models = {"rf_complete", "rf_without_insights"}
+    assert required_models <= set(results.keys())
+    optional_models = {"rf_sigma2_only", "rf_rsi14_only", "rf_technical_indicators"}
+    assert optional_models <= set(results.keys())
 
-    for name in ["rf_complete", "rf_without_insights"]:
+    for name, model_results in results.items():
+        if name == "statistical_tests":
+            continue
         _assert_model_results_structure(results[name], name)
         _assert_model_shap_plot(results[name], name, tmp_path)
 
