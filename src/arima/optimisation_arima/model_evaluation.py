@@ -10,9 +10,8 @@ import numpy as np
 import pandas as pd
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-from src.constants import (
-    ARIMA_MIN_SERIES_LENGTH_DIFFERENCED,
-)
+from src.constants import ARIMA_LJUNG_BOX_LAGS, ARIMA_MIN_SERIES_LENGTH_DIFFERENCED
+from src.arima.evaluation_arima import ljung_box_on_residuals
 from src.utils import get_logger
 
 logger = get_logger(__name__)
@@ -409,6 +408,21 @@ def _extract_model_metrics(fitted: Any, params: ArimaParams) -> Dict[str, object
     }
 
 
+def _summarize_ljung_box_result(lb_result: dict[str, Any]) -> dict[str, float | bool]:
+    """Extract Ljung-Box summary metrics from the full diagnostic output."""
+
+    p_values = lb_result.get("p_value")
+    reject_flags = lb_result.get("reject_5pct")
+    if not isinstance(p_values, list) or not p_values:
+        raise ValueError("Ljung-Box test returned no p-values.")
+    if not isinstance(reject_flags, list) or len(reject_flags) != len(p_values):
+        raise ValueError("Ljung-Box test returned inconsistent reject flags.")
+
+    last_pvalue = float(p_values[-1])
+    last_reject = bool(reject_flags[-1])
+    return {"lb_pvalue": last_pvalue, "lb_reject_5pct": last_reject}
+
+
 def evaluate_param_combination(
     y: pd.Series,
     params: ArimaParams,
@@ -439,11 +453,17 @@ def evaluate_param_combination(
         )
         result = _extract_model_metrics(fitted, params)
 
+        residuals = getattr(fitted, "resid", None)
+        if residuals is None:
+            raise RuntimeError("Fitted ARIMA model does not provide residuals for Ljung-Box test.")
+        lb_result = ljung_box_on_residuals(residuals, lags=ARIMA_LJUNG_BOX_LAGS)
+        result.update(_summarize_ljung_box_result(lb_result))
+
         # Perform walk-forward CV to test robustness (no metrics stored)
         if backtest_cfg:
             refit_override = backtest_cfg.get("refit_every")
             try:
-                walk_forward_backtest(
+                backtest_metrics = walk_forward_backtest(
                     y,
                     params,
                     n_splits=backtest_cfg["n_splits"],
@@ -452,7 +472,8 @@ def evaluate_param_combination(
                     enforce_invertibility=enforce_invertibility,
                     refit_every=refit_override,
                 )
-                # Walk-forward CV performed but metrics not stored
+                result["rmse"] = backtest_metrics["rmse"]
+                result["mae"] = backtest_metrics["mae"]
             except Exception as e:
                 # If walk-forward CV fails, log but don't fail the evaluation
                 logger.debug(f"Walk-forward CV failed for params {params}: {e}")

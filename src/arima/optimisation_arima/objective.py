@@ -59,6 +59,9 @@ def _store_evaluation_results(trial: optuna.Trial, res: dict, score: float) -> N
     if "error" not in res:
         trial.set_user_attr("aic", res.get("aic", float("inf")))
         trial.set_user_attr("bic", res.get("bic", float("inf")))
+        for key in ("rmse", "mae", "lb_pvalue", "lb_reject_5pct"):
+            if key in res:
+                trial.set_user_attr(key, res[key])
     else:
         trial.set_user_attr("error", res.get("error", "Unknown error"))
 

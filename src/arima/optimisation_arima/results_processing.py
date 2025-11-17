@@ -30,6 +30,16 @@ def to_dataframe(results: Iterable[dict]) -> pd.DataFrame:
     if df.empty:
         return df
 
+    ensured_metric_cols = {
+        "rmse": pd.NA,
+        "mae": pd.NA,
+        "lb_pvalue": pd.NA,
+        "lb_reject_5pct": pd.NA,
+    }
+    for col, default_value in ensured_metric_cols.items():
+        if col not in df.columns:
+            df[col] = default_value
+
     params_column = "params"
     param_cols: list[str] = []
 
@@ -40,7 +50,15 @@ def to_dataframe(results: Iterable[dict]) -> pd.DataFrame:
         param_cols = list(normalized.columns)
         df = df.drop(columns=[params_column]).join(normalized)
 
-    front = ["aic", "bic", "error"]
+    front = [
+        "aic",
+        "bic",
+        "rmse",
+        "mae",
+        "lb_pvalue",
+        "lb_reject_5pct",
+        "error",
+    ]
     front_cols = [c for c in front if c in df.columns]
     other_cols = [c for c in df.columns if c not in front_cols + param_cols]
 
@@ -115,6 +133,17 @@ def pick_best(df: object) -> tuple[dict[str, Any], dict[str, Any]]:
     # Check for successful models first (this raises RuntimeError if empty)
     df_ok = _filter_successful_models(df_typed)
 
+    # Prioritize models that pass Ljung-Box when diagnostics are available
+    lb_col = "lb_reject_5pct"
+    if lb_col in df_ok.columns:
+        lb_series = df_ok[lb_col].astype("boolean")
+        lb_mask = lb_series.fillna(True).astype(bool)
+        candidates = df_ok.loc[~lb_mask].copy()
+        if not candidates.empty:
+            df_ok = candidates
+        else:
+            logger.warning("All models reject Ljung-Box at 5%%; retaining full candidate set.")
+
     # Check for required columns
     if "aic" not in df_ok.columns:
         raise ValueError("DataFrame must contain 'aic' column for model selection.")
@@ -140,7 +169,8 @@ def determine_sort_columns(df: pd.DataFrame, criterion: str) -> list[str]:
 
     Returns a list of column names to use for sorting, prioritizing:
     1. lb_reject_5pct (if available) - prefer models that don't reject Ljung-Box test
-    2. The specified criterion (aic or bic)
+    2. lb_pvalue (if available) - prioritize larger Ljung-Box p-values
+    3. The specified criterion (aic or bic)
 
     Args:
         df: DataFrame with model evaluation results.
@@ -151,9 +181,11 @@ def determine_sort_columns(df: pd.DataFrame, criterion: str) -> list[str]:
     """
     sort_cols: list[str] = []
 
-    # Prioritize models that don't reject Ljung-Box test
+    # Prioritize models that don't reject Ljung-Box test and have larger p-values
     if "lb_reject_5pct" in df.columns:
         sort_cols.append("lb_reject_5pct")
+    if "lb_pvalue" in df.columns:
+        sort_cols.append("lb_pvalue")
 
     # Always include the criterion
     sort_cols.append(criterion)

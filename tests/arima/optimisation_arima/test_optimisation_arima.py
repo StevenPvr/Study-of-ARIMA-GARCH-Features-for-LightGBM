@@ -27,6 +27,7 @@ from src.arima.optimisation_arima.optimisation_arima import (  # noqa: E402
 from src.arima.optimisation_arima.results_processing import (  # noqa: E402
     build_best_model_dict,
     determine_sort_columns,
+    to_dataframe,
     pick_best,
 )
 from src.arima.optimisation_arima.validation import validate_backtest_config  # noqa: E402
@@ -50,6 +51,10 @@ class TestOptimizeArimaModels:
             required_metric_cols = [
                 "aic",
                 "bic",
+                "rmse",
+                "mae",
+                "lb_pvalue",
+                "lb_reject_5pct",
             ]
             for col in required_param_cols + required_metric_cols:
                 assert col in results_df.columns, f"Missing column: {col}"
@@ -114,6 +119,10 @@ class TestOptimizeArimaModels:
                     },
                     "aic": -100.0 - i,
                     "bic": -95.0 - i,
+                    "rmse": 0.1 + i * 0.01,
+                    "mae": 0.05 + i * 0.01,
+                    "lb_pvalue": 0.2,
+                    "lb_reject_5pct": False,
                 }
                 results.append(result)
             return results
@@ -564,6 +573,40 @@ class TestLoadTrainData:
             )
 
 
+class TestToDataFrame:
+    """Tests for the to_dataframe helper."""
+
+    def test_includes_new_metric_columns(self) -> None:
+        """Ensure rmse/mae and Ljung-Box columns are preserved."""
+        results = [
+            {
+                "params": {"p": 1, "d": 0, "q": 1, "trend": "c", "refit_every": 5},
+                "aic": 10.0,
+                "bic": 12.0,
+                "rmse": 0.1,
+                "mae": 0.05,
+                "lb_pvalue": 0.3,
+                "lb_reject_5pct": False,
+            }
+        ]
+        df = to_dataframe(results)
+        for col in ("rmse", "mae", "lb_pvalue", "lb_reject_5pct"):
+            assert col in df.columns
+
+    def test_columns_exist_even_if_missing_in_results(self) -> None:
+        """Ensure the DataFrame still exposes diagnostic columns when absent."""
+        results = [
+            {
+                "params": {"p": 1, "d": 0, "q": 1, "trend": "c", "refit_every": 5},
+                "aic": 10.0,
+                "bic": 12.0,
+            }
+        ]
+        df = to_dataframe(results)
+        for col in ("rmse", "mae", "lb_pvalue", "lb_reject_5pct"):
+            assert col in df.columns
+
+
 class TestBuildBestModelDict:
     """Tests for _build_best_model_dict function."""
 
@@ -634,10 +677,11 @@ class TestDetermineSortColumns:
                 "s": [12, 12],
                 "aic": [100.0, 95.0],
                 "lb_reject_5pct": [False, False],
+                "lb_pvalue": [0.4, 0.3],
             }
         )
         sort_cols = determine_sort_columns(results_df, "aic")
-        assert sort_cols == ["lb_reject_5pct", "aic"]
+        assert sort_cols == ["lb_reject_5pct", "lb_pvalue", "aic"]
 
     def test_without_backtest_metrics(self) -> None:
         """Test sorting without backtest metrics."""
@@ -652,10 +696,11 @@ class TestDetermineSortColumns:
                 "s": [12, 12],
                 "aic": [100.0, 95.0],
                 "lb_reject_5pct": [False, True],
+                "lb_pvalue": [0.4, 0.01],
             }
         )
         sort_cols = determine_sort_columns(results_df, "aic")
-        assert sort_cols == ["lb_reject_5pct", "aic"]
+        assert sort_cols == ["lb_reject_5pct", "lb_pvalue", "aic"]
 
     def test_without_lb_reject(self) -> None:
         """Test sorting without lb_reject_5pct."""
@@ -693,15 +738,16 @@ class TestSelectBestModels:
                 "bic": [105.0, 100.0, 95.0],
                 "backtest_rmse_mean": [0.3, 0.2, 0.25],
                 "lb_reject_5pct": [False, False, True],
+                "lb_pvalue": [0.4, 0.3, 0.01],
             }
         )
         best_aic, best_bic = pick_best(results_df)
-        # Should select model with lowest AIC (index 2, AIC=90.0)
-        assert best_aic["params"]["p"] == 3
-        assert best_aic["aic"] == 90.0
-        # BIC optimization removed - best_bic uses BIC column
-        assert best_bic["params"]["p"] == 3
-        assert best_bic["bic"] == 95.0
+        # Ljung-Box failures should be filtered out, so select p=2 despite lower AIC at p=3
+        assert best_aic["params"]["p"] == 2
+        assert best_aic["aic"] == 95.0
+        # BIC selection uses the same filtered subset
+        assert best_bic["params"]["p"] == 2
+        assert best_bic["bic"] == 100.0
 
 
 class TestValidateBacktestParameters:

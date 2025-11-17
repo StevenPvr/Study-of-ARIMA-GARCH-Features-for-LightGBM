@@ -149,6 +149,7 @@ ARIMA_MIN_TRAIN_SIZE_FOR_RESIDUALS: int = 60  # Minimum training window for reli
 ARIMA_MIN_SERIES_LENGTH_STATIONARITY: int = 10  # Minimum series length for stationarity tests
 ARIMA_MIN_SERIES_LENGTH_DIFFERENCED: int = 10  # Minimum differenced series length for validation
 ARIMA_BACKTEST_MIN_TRAIN_MARGIN: int = 16  # Minimum training margin for backtest (for differencing)
+ARIMA_LJUNG_BOX_LAGS: int = 20  # Default Ljung-Box lags used during ARIMA optimisation diagnostics
 
 # GARCH defaults and constraints
 GARCH_MIN_INIT_VAR: float = 1e-10
