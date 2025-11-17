@@ -15,6 +15,8 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from src.garch.garch_eval.eval import (
+    _filter_initial_observations_per_ticker,
+    _validate_garch_columns,
     egarch_multi_step_variance_forecast,
     egarch_one_step_variance_forecast,
     prediction_interval,
@@ -201,6 +203,62 @@ def test_forecaster_refit_success() -> None:
     assert bool(result.refit_mask[50])  # Initial fit
     # May have additional refits depending on convergence
     assert result.n_refits >= 1
+
+
+def test_filter_initial_observations_per_ticker_respects_window() -> None:
+    dates = pd.date_range("2024-01-01", periods=6, freq="D")
+    df = pd.DataFrame(
+        {
+            "tickers": ["AAA"] * 6 + ["BBB"] * 6,
+            "date": list(dates) * 2,
+            "value": range(12),
+        }
+    )
+
+    filtered = _filter_initial_observations_per_ticker(df, min_window_size=2)
+
+    assert set(filtered["tickers"]) == {"AAA", "BBB"}
+    # 4 rows per ticker remain because the first 2 are removed for each ticker
+    assert len(filtered) == 8
+    assert filtered.groupby("tickers").size().tolist() == [4, 4]
+
+
+def test_validate_garch_columns_detects_all_nan_columns() -> None:
+    df = pd.DataFrame(
+        {
+            "sigma2_egarch_raw": [np.nan, np.nan],
+            "sigma_garch": [np.nan, np.nan],
+            "sigma2_garch": [np.nan, np.nan],
+        }
+    )
+
+    with pytest.raises(ValueError, match="GARCH columns contain only NaN values"):
+        _validate_garch_columns(
+            df,
+            ("sigma2_egarch_raw", "sigma_garch", "sigma2_garch"),
+        )
+
+
+def test_validate_garch_columns_accepts_non_nan_columns() -> None:
+    df = pd.DataFrame(
+        {
+            "sigma2_egarch_raw": [np.nan, 1.0],
+            "sigma_garch": [np.nan, np.nan],
+            "sigma2_garch": [np.nan, np.nan],
+        }
+    )
+
+    with pytest.raises(ValueError, match="GARCH columns contain only NaN values"):
+        _validate_garch_columns(
+            df,
+            ("sigma2_egarch_raw", "sigma_garch"),
+        )
+
+    df["sigma_garch"] = [0.1, np.nan]
+    _validate_garch_columns(
+        df,
+        ("sigma2_egarch_raw", "sigma_garch"),
+    )
 
 
 def test_forecaster_refit_failure_continues_with_old_params() -> None:

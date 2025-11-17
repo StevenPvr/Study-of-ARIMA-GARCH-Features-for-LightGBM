@@ -212,6 +212,11 @@ GARCH_NUMERICAL_TEST_NAME_ENGLE_ARCH_LM: str = "Engle ARCH LM Test"
 GARCH_NUMERICAL_TEST_NAME_MCLEOD_LI: str = "McLeod-Li Test"
 
 GARCH_MIN_WINDOW_SIZE: int = 250  # Minimum window size to start forecasting (≈1 year of trading)
+GARCH_ESSENTIAL_FEATURE_COLUMNS: tuple[str, ...] = (
+    "sigma2_egarch_raw",
+    "sigma_garch",
+    "sigma2_garch",
+)
 GARCH_INITIAL_WINDOW_SIZE_DEFAULT: int = 500  # Default initial window size for GARCH training
 GARCH_LOG_VAR_MAX: float = 700.0  # Maximum log-variance for numerical stability
 GARCH_LOG_VAR_MIN: float = -700.0  # Minimum log-variance for numerical stability

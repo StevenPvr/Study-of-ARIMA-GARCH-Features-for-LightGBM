@@ -16,7 +16,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.constants import GARCH_EVAL_DEFAULT_LEVEL, GARCH_EVAL_FORCED_MIN_START_SIZE
+from src.constants import (
+    GARCH_ESSENTIAL_FEATURE_COLUMNS,
+    GARCH_EVAL_DEFAULT_LEVEL,
+    GARCH_EVAL_FORCED_MIN_START_SIZE,
+    GARCH_MIN_WINDOW_SIZE,
+)
 from src.garch.garch_eval.data_loading import load_and_prepare_residuals, load_model_params
 from src.garch.garch_eval.helpers import assemble_forecast_results
 from src.garch.garch_eval.variance_path import compute_initial_forecasts, compute_variance_path
@@ -812,8 +817,26 @@ def _filter_initial_observations_per_ticker(
     return df_filtered
 
 
+def _validate_garch_columns(df: pd.DataFrame, required_columns: tuple[str, ...]) -> None:
+    """Ensure essential GARCH columns exist and contain at least one value."""
+
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        msg = f"Missing essential GARCH columns: {missing_columns}"
+        raise KeyError(msg)
+
+    empty_columns = [col for col in required_columns if not df[col].notna().any()]
+    if empty_columns:
+        msg = f"GARCH columns contain only NaN values: {empty_columns}"
+        raise ValueError(msg)
+
+    logger.info("✓ Validated GARCH columns contain non-NaN values: %s", required_columns)
+
+
 def generate_data_tickers_full_insights(
     df_full_forecasts: pd.DataFrame | None = None,
+    *,
+    min_window_size: int = GARCH_MIN_WINDOW_SIZE,
 ) -> None:
     """Create data_tickers_full_insights from evaluation artifacts without truncation.
 
@@ -826,6 +849,8 @@ def generate_data_tickers_full_insights(
 
     Args:
         df_full_forecasts: Unused (kept for API stability).
+        min_window_size: Minimum observations to drop per ticker to skip the
+            GARCH warm-up period.
     """
     logger.info("Building data_tickers_full_insights from rolling_predictions + forecasts.csv…")
 
@@ -891,9 +916,18 @@ def generate_data_tickers_full_insights(
     # Provide compatibility alias for downstream consumers expecting 'sigma2_garch'
     df_garch_eval["sigma2_garch"] = df_garch_eval["sigma2_egarch_raw"]
 
+    if min_window_size < 0:
+        msg = "min_window_size must be non-negative"
+        raise ValueError(msg)
+
     # Merge: duplicate per-date GARCH/ARIMA across all tickers for that date
     df_out = df_tickers.merge(df_arima, on="date", how="left")
     df_out = df_out.merge(df_garch_eval, on="date", how="left")
+
+    df_out = _filter_initial_observations_per_ticker(
+        df_out,
+        min_window_size=min_window_size,
+    )
 
     # Sort deterministically: split (train→test) if present, then date, then tickers
     def _split_order(v: object) -> int:
@@ -907,6 +941,8 @@ def generate_data_tickers_full_insights(
     else:
         sort_cols = ["date"] + (["tickers"] if "tickers" in df_out.columns else [])
         df_out = df_out.sort_values(sort_cols).reset_index(drop=True)
+
+    _validate_garch_columns(df_out, GARCH_ESSENTIAL_FEATURE_COLUMNS)
 
     # Persist parquet + CSV to configured paths
     out_parquet = DATA_TICKERS_FULL_INSIGHTS_FILE
