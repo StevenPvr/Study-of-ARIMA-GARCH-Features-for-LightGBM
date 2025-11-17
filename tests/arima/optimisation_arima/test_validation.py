@@ -5,15 +5,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pandas as pd
+import pytest
+
 # Add project root to Python path for direct execution
 _script_dir = Path(__file__).parent
 _project_root = _script_dir.parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-import pytest
-
-from src.arima.optimisation_arima.validation import compute_test_size_from_ratio
+from src.arima.optimisation_arima.validation import (
+    compute_test_size_from_ratio,
+    validate_backtest_config,
+    validate_series,
+)
 
 
 class TestComputeTestSizeFromRatio:
@@ -125,6 +130,67 @@ class TestComputeTestSizeFromRatio:
         # Expected: 1260 * 0.2 / 5 = 50.4 -> 50
         result = compute_test_size_from_ratio(train_len=1260, test_size_ratio=0.2, n_splits=5)
         assert result == 50
+
+
+class TestValidateSeries:
+    """Tests for validate_series input validation."""
+
+    def test_validate_series_numeric(self) -> None:
+        """It should accept numeric pandas Series without errors."""
+
+        series = pd.Series([1.0, 2.0, 3.0], name="close")
+
+        validate_series("close", series)
+
+    def test_validate_series_empty(self) -> None:
+        """Empty Series should raise ValueError."""
+
+        empty_series = pd.Series([], dtype=float)
+
+        with pytest.raises(ValueError, match="close is empty"):
+            validate_series("close", empty_series)
+
+    def test_validate_series_non_numeric(self) -> None:
+        """Non-numeric Series should raise TypeError."""
+
+        text_series = pd.Series(["a", "b"], name="close")
+
+        with pytest.raises(TypeError, match="close must be numeric"):
+            validate_series("close", text_series)
+
+    def test_validate_series_with_nan_values(self) -> None:
+        """Series containing NaNs should raise ValueError."""
+
+        nan_series = pd.Series([1.0, float("nan")], name="close")
+
+        with pytest.raises(ValueError, match="contains NaNs"):
+            validate_series("close", nan_series)
+
+
+class TestValidateBacktestConfig:
+    """Tests for validate_backtest_config logic."""
+
+    def test_validate_backtest_config_respects_constant_margin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The constant margin should be enforced even when test_size is smaller."""
+
+        monkeypatch.setattr(
+            "src.arima.optimisation_arima.validation.ARIMA_BACKTEST_MIN_TRAIN_MARGIN",
+            25,
+        )
+
+        with pytest.raises(ValueError, match="Series too short for backtest"):
+            validate_backtest_config(n_splits=2, test_size=5, refit_every=1, train_len=2 * 5 + 24)
+
+    def test_validate_backtest_config_uses_test_size_when_larger(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When test_size exceeds the margin constant it should determine the minimum length."""
+
+        monkeypatch.setattr(
+            "src.arima.optimisation_arima.validation.ARIMA_BACKTEST_MIN_TRAIN_MARGIN",
+            4,
+        )
+
+        # min_margin becomes max(4, 10) -> 10
+        validate_backtest_config(n_splits=3, test_size=10, refit_every=2, train_len=3 * 10 + 10)
 
 
 if __name__ == "__main__":

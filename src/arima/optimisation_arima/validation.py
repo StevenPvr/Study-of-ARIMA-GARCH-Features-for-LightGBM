@@ -1,6 +1,6 @@
-"""Validation helpers for ARIMA optimization."""
-
 from __future__ import annotations
+
+__doc__ = """Validation helpers for ARIMA optimization."""
 
 import pandas as pd
 
