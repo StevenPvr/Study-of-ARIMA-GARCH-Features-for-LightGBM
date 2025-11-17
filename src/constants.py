@@ -261,6 +261,13 @@ GARCH_EVAL_DEFAULT_ALPHAS: tuple[float, ...] = (0.01, 0.05)
 GARCH_EVAL_DEFAULT_LEVEL: float = 0.95  # Default confidence level for VaR evaluation
 GARCH_EVAL_DEFAULT_SLOPE: float = 1.0  # Neutral slope for MZ calibration fallback
 GARCH_EVAL_FORCED_MIN_START_SIZE: int = 200
+GARCH_EVAL_FORECAST_MODE_NO_REFIT: str = "no_refit"
+GARCH_EVAL_FORECAST_MODE_HYBRID: str = "hybrid"
+GARCH_EVAL_FORECAST_MODE_CHOICES: tuple[str, ...] = (
+    GARCH_EVAL_FORECAST_MODE_NO_REFIT,
+    GARCH_EVAL_FORECAST_MODE_HYBRID,
+)
+GARCH_EVAL_FORECAST_MODE_DEFAULT: str = GARCH_EVAL_FORECAST_MODE_NO_REFIT
 
 
 GARCH_MODEL_NAMES: tuple[str, ...] = ("egarch_normal", "egarch_student", "egarch_skewt")
