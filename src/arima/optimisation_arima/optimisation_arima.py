@@ -14,6 +14,7 @@ from src.constants import (
     ARIMA_OPTIMIZATION_N_TRIALS,
     ARIMA_OPTIMIZATION_TEST_SIZE,
     ARIMA_OPTIMIZATION_TOP_K_RESULTS,
+    ARIMA_REFIT_EVERY_OPTIONS,
     DEFAULT_RANDOM_STATE,
 )
 from src.path import ARIMA_BEST_MODELS_FILE, ARIMA_OPTIMIZATION_RESULTS_FILE
@@ -342,7 +343,7 @@ def _compute_backtest_configuration(
         backtest_n_splits: Number of temporal backtest splits
             (default: ARIMA_OPTIMIZATION_N_SPLITS).
         backtest_test_size: Absolute size of each test window (default: computed from ratio).
-        backtest_refit_every: Refit frequency (required).
+        backtest_refit_every: Refit frequency (defaults to first value in ARIMA_REFIT_EVERY_OPTIONS).
         train_series: Training time series data for size calculations.
 
     Returns:
@@ -350,8 +351,11 @@ def _compute_backtest_configuration(
     """
     n_splits = backtest_n_splits if backtest_n_splits is not None else ARIMA_OPTIMIZATION_N_SPLITS
     if backtest_refit_every is None:
-        raise ValueError("backtest_refit_every must be provided explicitly")
-    refit_every = backtest_refit_every
+        if not ARIMA_REFIT_EVERY_OPTIONS:
+            raise ValueError("ARIMA_REFIT_EVERY_OPTIONS must define at least one refit frequency")
+        refit_every = ARIMA_REFIT_EVERY_OPTIONS[0]
+    else:
+        refit_every = int(backtest_refit_every)
 
     if backtest_test_size is None:
         test_size = compute_test_size_from_ratio(
@@ -407,7 +411,7 @@ def optimize_arima_models(
         backtest_n_splits: Number of temporal backtest splits
             (default: ARIMA_OPTIMIZATION_N_SPLITS).
         backtest_test_size: Absolute size of each test window (default: computed from ratio).
-        backtest_refit_every: Refit frequency (required).
+        backtest_refit_every: Refit frequency (defaults to first value in ARIMA_REFIT_EVERY_OPTIONS).
         out_dir: Optional output directory for saving results.
         random_state: Random seed for reproducibility (default: 42).
 

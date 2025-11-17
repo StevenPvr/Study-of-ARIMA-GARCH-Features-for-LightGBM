@@ -30,6 +30,7 @@ from src.arima.optimisation_arima.results_processing import (  # noqa: E402
     pick_best,
 )
 from src.arima.optimisation_arima.validation import validate_backtest_config  # noqa: E402
+from src.constants import ARIMA_REFIT_EVERY_OPTIONS  # noqa: E402
 
 
 class TestOptimizeArimaModels:
@@ -145,6 +146,41 @@ class TestOptimizeArimaModels:
         assert mock_run_optuna.call_count == 1
         # Verify call was for AIC
         assert mock_run_optuna.call_args_list[0].kwargs.get("criterion") == "aic"
+
+    @patch("src.arima.optimisation_arima.results_processing.save_results")
+    @patch("src.arima.optimisation_arima.optimisation_arima._run_optuna")
+    def test_optimize_arima_models_defaults_use_explicit_refit(
+        self,
+        mock_run_optuna: MagicMock,
+        mock_save: MagicMock,
+    ) -> None:
+        """Ensure default backtest configuration injects explicit refit frequency."""
+
+        train_series = pd.Series([0.01 * i for i in range(200)])
+
+        mock_run_optuna.return_value = [
+            {
+                "params": {
+                    "p": 1,
+                    "d": 0,
+                    "q": 1,
+                    "trend": "n",
+                    "refit_every": ARIMA_REFIT_EVERY_OPTIONS[0],
+                },
+                "aic": -10.0,
+                "bic": -9.0,
+            }
+        ]
+
+        results_df, best_aic, best_bic = optimize_arima_models(train_series)
+
+        self._assert_results_dataframe(results_df)
+        assert "params" in best_aic
+        assert best_bic is None
+
+        assert mock_run_optuna.call_count == 1
+        backtest_cfg = mock_run_optuna.call_args_list[0].kwargs["backtest_cfg"]
+        assert backtest_cfg["refit_every"] == ARIMA_REFIT_EVERY_OPTIONS[0]
 
     @patch("src.arima.optimisation_arima.optimisation_arima._run_optuna")
     def test_optimize_arima_models_no_convergence(

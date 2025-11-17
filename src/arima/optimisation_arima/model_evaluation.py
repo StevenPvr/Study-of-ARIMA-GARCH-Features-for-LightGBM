@@ -211,6 +211,7 @@ def _predict_single_split(
     test_end: int,
     enforce_stationarity: bool,
     enforce_invertibility: bool,
+    refit_every: int,
 ) -> tuple[list[float], list[float]]:
     """Make predictions for a single backtest split.
 
@@ -221,6 +222,7 @@ def _predict_single_split(
         test_end: End index of test split.
         enforce_stationarity: Whether to enforce stationarity constraints.
         enforce_invertibility: Whether to enforce invertibility constraints.
+        refit_every: Number of observations between refits during walk-forward backtest.
 
     Returns:
         Tuple of (predictions, actuals) for this split.
@@ -231,9 +233,9 @@ def _predict_single_split(
     predictions: list[float] = []
     actuals: list[float] = []
 
-    for offset in range(0, test_end - test_start, max(1, params.refit_every)):
+    for offset in range(0, test_end - test_start, max(1, refit_every)):
         block_start = test_start + offset
-        block_end = min(block_start + params.refit_every, test_end)
+        block_end = min(block_start + refit_every, test_end)
 
         y_train = y.iloc[:block_start]
         if len(y_train) <= 0:
@@ -334,6 +336,7 @@ def walk_forward_backtest(
     test_size: int,
     enforce_stationarity: bool = False,  # Disabled for stationary log-returns
     enforce_invertibility: bool = True,
+    refit_every: int | None = None,
 ) -> Dict[str, float]:
     """Perform strict time-aware walk-forward backtest with periodic refits.
 
@@ -348,6 +351,7 @@ def walk_forward_backtest(
         test_size: Size of each test set.
         enforce_stationarity: Whether to enforce stationarity constraints.
         enforce_invertibility: Whether to enforce invertibility constraints.
+        refit_every: Optional override for refit frequency. Defaults to params.refit_every.
 
     Returns:
         Dictionary with validation metrics: rmse, mae, mean_error.
@@ -357,6 +361,9 @@ def walk_forward_backtest(
     """
     # Validate inputs and prepare data
     train_end = _validate_backtest_inputs(y, n_splits, test_size)
+    effective_refit_every = params.refit_every if refit_every is None else int(refit_every)
+    if effective_refit_every < 1:
+        raise ValueError("refit_every must be >= 1 for walk-forward backtest.")
     y_prepared = _prepare_time_series(y)
 
     # Collect all predictions and actuals across splits
@@ -374,6 +381,7 @@ def walk_forward_backtest(
             test_end,
             enforce_stationarity,
             enforce_invertibility,
+            effective_refit_every,
         )
         all_predictions.extend(split_predictions)
         all_actuals.extend(split_actuals)
@@ -433,6 +441,7 @@ def evaluate_param_combination(
 
         # Perform walk-forward CV to test robustness (no metrics stored)
         if backtest_cfg:
+            refit_override = backtest_cfg.get("refit_every")
             try:
                 walk_forward_backtest(
                     y,
@@ -441,6 +450,7 @@ def evaluate_param_combination(
                     test_size=backtest_cfg["test_size"],
                     enforce_stationarity=enforce_stationarity,
                     enforce_invertibility=enforce_invertibility,
+                    refit_every=refit_override,
                 )
                 # Walk-forward CV performed but metrics not stored
             except Exception as e:
