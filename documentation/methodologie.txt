@@ -1,0 +1,588 @@
+================================================================================
+MÉTHODOLOGIE DU PROJET : FORECASTING DU S&P 500
+Test de l'impact de la prévision de volatilité conditionnelle d'un modèle 
+ARIMA-GARCH sur la capacité de prévision d'un LightGBM
+================================================================================
+
+OBJECTIF DU PROJET
+------------------
+Évaluer si l'ajout de features issues d'un modèle ARIMA-GARCH améliore les 
+prévisions d'un modèle LightGBM pour les rendements du S&P 500.
+
+HYPOTHÈSE CENTRALE
+-------------------
+Les modèles ARIMA-GARCH capturent des patterns temporels et de volatilité 
+conditionnelle qui peuvent enrichir un modèle LightGBM et améliorer ses 
+prévisions de rendements.
+
+ARCHITECTURE GLOBALE
+--------------------
+Le projet suit une architecture modulaire en pipelines séquentiels :
+
+1. PIPELINE DE DONNÉES (data/)
+   ↓
+2. PIPELINE ARIMA (arima/)
+   ↓
+3. PIPELINE GARCH (garch/)
+   ↓
+4. PIPELINE LIGHTGBM (lightgbm/)
+
+================================================================================
+1. PIPELINE DE DONNÉES
+================================================================================
+
+1.1 DATA FETCHING (data_fetching/)
+----------------------------------
+Objectif : Collecter les données historiques du S&P 500
+
+Méthodologie :
+- Récupération de la liste des tickers S&P 500 depuis Wikipedia
+- Téléchargement des données historiques via yfinance (12 ans : 2013-2024)
+- Utilisation des prix ajustés (adjusted close) pour éviter les effets de 
+  splits et dividendes
+- Période fixe : 2013-01-01 à 2024-12-31 (reproductibilité)
+
+Sorties :
+- sp500_tickers.csv : Liste des tickers
+- dataset.csv : Données brutes (date, ticker, open, close, volume)
+
+1.2 DATA CLEANING (data_cleaning/)
+----------------------------------
+Objectif : Nettoyer et valider la qualité des données
+
+Méthodologie :
+- Filtrage des tickers avec volume insuffisant
+- Vérification de la monotonie des timestamps
+- Détection et gestion des valeurs manquantes
+- Validation de la cohérence temporelle
+
+Sorties :
+- dataset_filtered.csv : Données nettoyées
+- data_quality_report.json : Rapport de qualité
+
+1.3 DATA CONVERSION (data_conversion/)
+--------------------------------------
+Objectif : Convertir les données individuelles en série agrégée pondérée
+
+Méthodologie :
+- Calcul de poids de liquidité par ticker (volume × prix de clôture)
+- Fenêtre glissante de 20 jours (par défaut) pour les poids
+- Décalage d'un jour pour éviter le look-ahead bias
+- Agrégation pondérée des prix et calcul des rendements logarithmiques
+- Normalisation des poids par date
+
+Formule :
+  w_i,t = moyenne_glissante(volume_i × close_i) sur [t-window, t-1]
+  prix_pondéré_t = Σ(w_i,t × close_i,t) / Σ(w_i,t)
+  rendement_t = log(prix_pondéré_t / prix_pondéré_{t-1})
+
+Sorties :
+- weighted_log_returns.csv : Série temporelle des rendements pondérés
+- liquidity_weights.csv : Poids de liquidité par ticker et date
+
+1.4 DATA PREPARATION (data_preparation/)
+----------------------------------------
+Objectif : Préparer les splits train/test pour l'évaluation
+
+Méthodologie :
+- Split temporel 80/20 (train/test)
+- Préservation de l'ordre temporel (pas de shuffle)
+- Validation de la non-superposition des périodes
+
+Sorties :
+- weighted_log_returns_split.csv : Données avec colonne "split"
+
+1.5 STATIONNARITY CHECK (stationnarity_check/)
+----------------------------------------------
+Objectif : Vérifier la stationnarité de la série de rendements
+
+Méthodologie :
+- Tests ADF (Augmented Dickey-Fuller)
+- Tests KPSS (Kwiatkowski-Phillips-Schmidt-Shin)
+- Rééchantillonnage hebdomadaire pour lisser la série
+- Les rendements logarithmiques sont généralement stationnaires
+
+Sorties :
+- stationarity_report.json : Résultats des tests
+
+================================================================================
+2. PIPELINE ARIMA
+================================================================================
+
+2.1 OPTIMISATION (optimisation_arima/)
+--------------------------------------
+Objectif : Trouver les meilleurs hyperparamètres ARIMA
+
+Méthodologie :
+- Recherche exhaustive sur grille d'hyperparamètres :
+  * p, d, q ∈ [0, 5] (ordre ARIMA)
+  * P, D, Q ∈ [0, 2] (composante saisonnière)
+  * s = 12 (période saisonnière mensuelle)
+- Évaluation par walk-forward validation avec TimeSeriesSplit
+- Métrique : MSE (Mean Squared Error)
+- Sélection du meilleur modèle selon AIC/BIC
+
+Hyperparamètres testés :
+- p_range: [0, 5]
+- d_range: [0, 2]
+- q_range: [0, 5]
+- P_range: [0, 2]
+- D_range: [0, 1]
+- Q_range: [0, 2]
+- s: 12 (saisonnalité mensuelle)
+
+Sorties :
+- sarima_best_models.json : Meilleurs modèles par critère
+- sarima_optimization_results.csv : Résultats de tous les modèles testés
+
+2.2 TRAINING (training_arima/)
+------------------------------
+Objectif : Entraîner le meilleur modèle ARIMA sur les données d'entraînement
+
+Méthodologie :
+- Sélection du meilleur modèle selon AIC
+- Ajustement sur la série d'entraînement complète
+- Sauvegarde du modèle entraîné
+
+Sorties :
+- sarima_trained_model.pkl : Modèle entraîné
+- sarima_trained_model_metadata.json : Métadonnées (ordre, AIC, etc.)
+
+2.3 ÉVALUATION (evaluation_arima/)
+----------------------------------
+Objectif : Évaluer les performances du modèle ARIMA
+
+Méthodologie :
+- Rolling forecast avec refit périodique (tous les 20 jours par défaut)
+- Prévisions à 1 jour d'horizon
+- Calcul des résidus : ε_t = r_t - r̂_t
+- Métriques : MSE, RMSE, MAE, MAPE
+- Test de Ljung-Box sur les résidus (validation de l'indépendance)
+
+Rolling Forecast :
+- Fenêtre d'entraînement qui s'étend (expanding window)
+- Refit tous les 20 jours pour s'adapter aux changements
+- Prévisions uniquement sur la période de test
+
+Sorties :
+- rolling_predictions_sarima_000.csv : Prévisions rolling
+- rolling_validation_metrics_sarima_000.json : Métriques d'évaluation
+- ljungbox_residuals_sarima_000.json : Résultats du test Ljung-Box
+- dataset_garch.csv : Dataset avec résidus ARIMA pour GARCH
+
+================================================================================
+3. PIPELINE GARCH
+================================================================================
+
+3.1 VISUALISATION DES DONNÉES (garch_data_visualisation/)
+----------------------------------------------------------
+Objectif : Analyser visuellement les patterns de volatilité
+
+Méthodologie :
+- Visualisation du clustering de volatilité
+- ACF/PACF des rendements au carré
+- Identification visuelle d'effets ARCH/GARCH
+
+3.2 DÉTECTION DE STRUCTURE (structure_garch/)
+---------------------------------------------
+Objectif : Détecter la présence d'hétéroscédasticité conditionnelle
+
+Méthodologie :
+- Test ARCH-LM (Lagrange Multiplier) sur les résidus ARIMA
+- Analyse de l'autocorrélation des résidus au carré (ACF/PACF)
+- Identification de la structure GARCH appropriée
+
+Tests effectués :
+- ARCH-LM test (12 lags par défaut)
+- ACF/PACF des résidus au carré (20 lags)
+
+Sorties :
+- garch_diagnostics.json : Résultats des tests
+- garch_structure.png : Visualisation de la structure
+
+3.3 ESTIMATION DES PARAMÈTRES (garch_params/)
+----------------------------------------------
+Objectif : Estimer les paramètres EGARCH(1,1) par maximum de vraisemblance
+
+Méthodologie :
+- Estimation simultanée pour 3 distributions :
+  * Normale
+  * Student-t (avec paramètre de degrés de liberté ν)
+  * Skew-t (avec paramètres ν et λ)
+- Maximum de vraisemblance conditionnelle
+- Sélection de la meilleure distribution selon AIC/BIC
+
+Modèle EGARCH(1,1) :
+  log(σ²_t) = ω + α·(|z_{t-1}| - E|z_{t-1}|) + γ·z_{t-1} + β·log(σ²_{t-1})
+  
+  où z_t = ε_t / σ_t sont les résidus standardisés
+
+Contraintes :
+- α + β < 0.999 (stationnarité)
+- ω > 1e-12 (variance minimale)
+- ν ∈ [2.01, 200] pour Student-t
+- λ ∈ [-0.99, 0.99] pour Skew-t
+
+Sorties :
+- garch_estimation.json : Paramètres estimés pour chaque distribution
+
+3.4 TRAINING (training_garch/)
+------------------------------
+Objectif : Entraîner le modèle GARCH avec la meilleure distribution
+
+Méthodologie :
+- Sélection de la distribution optimale (selon diagnostics)
+- Calcul du chemin de variance conditionnelle σ²_t sur toute la période
+- Calcul des résidus standardisés z_t = ε_t / σ_t
+- Diagnostic des résidus standardisés
+
+Sorties :
+- garch_model.joblib : Modèle entraîné
+- garch_model.json : Métadonnées du modèle
+- garch_variance.csv : Variance conditionnelle et résidus standardisés
+
+3.5 DIAGNOSTIC (garch_diagnostic/)
+----------------------------------
+Objectif : Valider la qualité du modèle GARCH
+
+Méthodologie :
+- Test de Ljung-Box sur les résidus standardisés
+- Test de Ljung-Box sur les résidus standardisés au carré
+- QQ-plot pour vérifier la distribution
+- Tests de normalité/Student-t/Skew-t selon la distribution choisie
+
+Sorties :
+- garch_postcheck_ljungbox.json : Résultats des tests
+- garch_distribution_diagnostics.json : Diagnostics de distribution
+- Plots de diagnostic (QQ-plot, ACF/PACF)
+
+3.6 ÉVALUATION (garch_eval/)
+----------------------------
+Objectif : Évaluer les prévisions de volatilité
+
+Méthodologie :
+- Prévisions de variance à 1 pas et multi-pas (horizon = 5 par défaut)
+- Calibration MZ (Mincer-Zarnowitz) optionnelle
+- Calcul de VaR (Value at Risk) à différents niveaux (α = 0.01, 0.05)
+- Métriques : MSE, MAE, QLIKE, MZ regression
+- Backtesting des violations VaR
+
+Métriques calculées :
+- MSE, MAE sur les prévisions de variance
+- QLIKE (Quasi-Likelihood)
+- MZ regression (calibration)
+- Coverage des intervalles de prédiction
+- VaR violations (Kupiec test)
+
+Sorties :
+- garch_forecasts.csv : Prévisions de variance
+- garch_eval_metrics.json : Métriques d'évaluation
+- Plots d'évaluation (timeseries, scatter, résidus, violations VaR)
+
+3.7 ROLLING GARCH (rolling_garch/)
+-----------------------------------
+Objectif : Générer des prévisions rolling pour le dataset ML
+
+Méthodologie :
+- Rolling forecast avec refit périodique (tous les 20 jours)
+- Fenêtre d'entraînement expanding ou rolling
+- Sélection automatique de la distribution (auto) ou fixe
+- Génération de features pour LightGBM :
+  * sigma2_garch : Variance conditionnelle
+  * sigma_garch : Volatilité conditionnelle (√σ²)
+  * std_resid_garch : Résidus standardisés
+
+Important :
+- Pas de look-ahead bias : prévisions utilisent uniquement données jusqu'à t-1
+- Refit tous les 20 jours pour adaptation
+- Minimum 100 observations avant de commencer les prévisions
+
+Sorties :
+- garch_rolling_forecasts.csv : Prévisions rolling
+- garch_rolling_eval.json : Métriques rolling
+- garch_ml_dataset.csv : Dataset avec features GARCH pour ML
+- rolling/garch_variance.csv : Variance rolling complète
+
+================================================================================
+4. PIPELINE LIGHTGBM
+================================================================================
+
+4.1 PRÉPARATION DES DONNÉES (lightgbm/data_preparation/)
+--------------------------------------------------------------
+Objectif : Créer les datasets avec features pour LightGBM
+
+Méthodologie :
+- Fusion des données de base avec les features ARIMA-GARCH
+- Ajout d'indicateurs techniques :
+  * RSI (Relative Strength Index, fenêtre 14)
+  * SMA (Simple Moving Average, fenêtre 20)
+  * EMA (Exponential Moving Average, fenêtre 20)
+  * MACD (Moving Average Convergence Divergence)
+- Création de features laggées :
+  * Windows : [1, 5, 10, 20] jours
+  * Colonnes laggées : weighted_log_return, sigma2_garch, sigma_garch, 
+    std_resid_garch, rsi_14, sma_20, ema_20, macd, macd_signal, macd_histogram
+- Décalage de la cible (weighted_log_return_t = weighted_log_return.shift(-1))
+- Suppression des valeurs manquantes
+
+Datasets créés :
+1. lightgbm_dataset_complete.csv : Toutes les features (y compris ARIMA-GARCH)
+2. lightgbm_dataset_without_insights.csv : Sans les insights ARIMA-GARCH
+   (exclut : arima_pred_return, arima_residual_return, sigma2_garch, 
+    sigma_garch, std_resid_garch)
+3. lightgbm_dataset_without_sigma2.csv : Sans sigma2_garch uniquement
+
+Sorties :
+- lightgbm_dataset_complete.csv
+- lightgbm_dataset_without_insights.csv
+- lightgbm_dataset_without_sigma2.csv
+
+4.2 ANALYSE DE CORRÉLATION (lightgbm/correlation/)
+--------------------------------------------------------
+Objectif : Analyser les corrélations entre features
+
+Méthodologie :
+- Calcul de la matrice de corrélation
+- Visualisation avec heatmap
+- Identification des features hautement corrélées
+
+Sorties :
+- Plots de corrélation (complete et without_insights)
+
+4.3 OPTIMISATION (lightgbm/optimisation/)
+-----------------------------------------------
+Objectif : Optimiser les hyperparamètres du LightGBM
+
+Méthodologie :
+- Optimisation bayésienne avec Optuna (50 trials par défaut)
+- Walk-forward cross-validation (5 folds)
+- Métrique : Log Loss sur les erreurs au carré
+  loss = mean(log(1 + (y_true - y_pred)²))
+
+Hyperparamètres optimisés :
+- n_estimators : [50, 500]
+- max_depth : [5, 50]
+- min_samples_split : [2, 20]
+- min_samples_leaf : [1, 10]
+- max_features : ['sqrt', 'log2', None]
+
+Contraintes :
+- Random state fixe (42) pour reproductibilité
+- TimeSeriesSplit pour préserver l'ordre temporel
+
+Sorties :
+- optimization_results.json : Meilleurs hyperparamètres et résultats
+
+4.4 TRAINING (lightgbm/training/)
+----------------------------------------
+Objectif : Entraîner le LightGBM avec les hyperparamètres optimaux
+
+Méthodologie :
+- Chargement des hyperparamètres optimaux
+- Entraînement sur le dataset complet (avec toutes les features)
+- Calcul de la log loss sur l'ensemble d'entraînement
+
+Sorties :
+- Modèle entraîné sauvegardé (joblib)
+- training_results.json : Métriques d'entraînement
+
+4.5 ÉVALUATION (lightgbm/eval/)
+-------------------------------------
+Objectif : Évaluer les performances du LightGBM
+
+Méthodologie :
+- Prédictions sur l'ensemble de test
+- Calcul des métriques :
+  * MSE, RMSE, MAE
+  * R² (coefficient de détermination)
+  * L'étude empirique LightGBM se concentre sur ces indicateurs sans MAPE
+- Analyse d'importance des features (feature importance)
+- Analyse SHAP (SHapley Additive exPlanations) pour interprétabilité
+
+Métriques calculées :
+- MSE, RMSE, MAE
+- R² score
+- Feature importances
+- SHAP values (pour interprétabilité)
+
+Sorties :
+- eval_results.json : Métriques d'évaluation
+- Plots SHAP : Importance des features
+
+4.6 ABLATION STUDY (lightgbm/ablation/)
+---------------------------------------------
+Objectif : Mesurer l'impact des features ARIMA-GARCH
+
+Méthodologie :
+- Comparaison des performances avec/sans features ARIMA-GARCH
+- Test spécifique sur l'impact de sigma2_garch
+- Évaluation sur le même split test
+
+Datasets comparés :
+- Complete vs Without Insights
+- Complete vs Without Sigma2
+
+Sorties :
+- ablation_sigma2_results.json : Résultats de l'étude d'ablation
+
+================================================================================
+5. EXÉCUTION DU PIPELINE COMPLET
+================================================================================
+
+Le pipeline complet peut être exécuté via :
+
+    python src/main_global.py
+
+Ce script découvre automatiquement tous les modules main.py et les exécute 
+dans le bon ordre :
+
+1. data_fetching
+2. data_cleaning
+3. data_conversion
+4. data_preparation
+5. data_visualisation (optionnel)
+6. stationnarity_check
+7. optimisation_arima
+8. training_arima
+9. evaluation_arima
+10. garch_data_visualisation (optionnel)
+11. structure_garch
+12. garch_params
+13. training_garch
+14. garch_diagnostic
+15. garch_eval
+16. rolling_garch
+17. lightgbm/data_preparation
+19. lightgbm/correlation
+20. lightgbm/optimisation
+21. lightgbm/training
+22. lightgbm/eval
+23. lightgbm/ablation
+
+================================================================================
+7. STRUCTURE DES DONNÉES
+================================================================================
+
+7.1 Données d'entrée (data/)
+-----------------------------
+- sp500_tickers.csv : Liste des tickers
+- dataset.csv : Données brutes par ticker
+- dataset_filtered.csv : Données nettoyées
+
+7.2 Données intermédiaires (data/)
+----------------------------------
+- weighted_log_returns.csv : Rendements pondérés
+- weighted_log_returns_split.csv : Avec split train/test
+- liquidity_weights.csv : Poids de liquidité
+
+7.3 Résultats ARIMA (results/)
+-------------------------------
+- sarima_best_models.json : Meilleurs modèles
+- sarima_optimization_results.csv : Résultats d'optimisation
+- rolling_predictions_sarima_*.csv : Prévisions rolling
+- rolling_validation_metrics_sarima_*.json : Métriques
+- dataset_garch.csv : Dataset avec résidus ARIMA
+
+7.4 Résultats GARCH (results/garch/)
+------------------------------------
+- structure/garch_diagnostics.json : Tests ARCH-LM
+- eval/garch_estimation.json : Paramètres estimés
+- diagnostic/garch_postcheck_ljungbox.json : Tests post-estimation
+- garch_variance.csv : Variance conditionnelle
+- garch_forecasts.csv : Prévisions de variance
+- garch_rolling_forecasts.csv : Prévisions rolling
+- rolling/garch_variance.csv : Variance rolling complète
+
+7.5 Datasets LightGBM (data/)
+-----------------------------------
+- lightgbm_dataset_complete.csv : Toutes les features
+- lightgbm_dataset_without_insights.csv : Sans ARIMA-GARCH
+- lightgbm_dataset_without_sigma2.csv : Sans sigma2_garch
+
+7.6 Résultats LightGBM (results/lightgbm/)
+----------------------------------------------------
+- optimization_results.json : Hyperparamètres optimaux
+- training_results.json : Résultats d'entraînement
+- eval_results.json : Métriques d'évaluation
+- ablation_sigma2_results.json : Étude d'ablation
+- models/ : Modèles entraînés (joblib)
+
+================================================================================
+8. REPRODUCTIBILITÉ
+================================================================================
+
+- Random state fixe : 42 (DEFAULT_RANDOM_STATE)
+- Période de données fixe : 2013-01-01 à 2024-12-31
+- Split train/test fixe : 80/20 (temporel)
+- Seeds fixés pour numpy, pandas, sklearn, optuna
+
+================================================================================
+9. MÉTRIQUES CLÉS
+================================================================================
+
+9.1 Métriques ARIMA
+--------------------
+- MSE, RMSE, MAE, MAPE
+- AIC, BIC (sélection de modèle)
+- Ljung-Box test (validation des résidus)
+
+9.2 Métriques GARCH
+--------------------
+- MSE, MAE, QLIKE (sur variance)
+- MZ regression (calibration)
+- VaR coverage (backtesting)
+- Ljung-Box sur résidus standardisés
+
+9.3 Métriques LightGBM
+-----------------------------
+- MSE, RMSE, MAE
+- R² score
+- Log Loss (métrique d'optimisation)
+- Feature importances
+- SHAP values
+
+================================================================================
+10. HYPOTHÈSES TESTÉES
+================================================================================
+
+H1 : Les features ARIMA-GARCH améliorent les prévisions du LightGBM
+   → Testé via comparaison Complete vs Without Insights
+
+H2 : La variance conditionnelle (sigma2_garch) est une feature importante
+   → Testé via ablation study (Complete vs Without Sigma2)
+
+H3 : Le modèle ARIMA-GARCH capture des patterns de volatilité significatifs
+   → Testé via diagnostics GARCH (ARCH-LM, Ljung-Box)
+
+H4 : Le modèle EGARCH est supérieur aux baselines simples
+   → Testé via volatility backtest (EWMA, Rolling, ARCH, HAR)
+
+================================================================================
+11. LIMITATIONS & CONSIDÉRATIONS
+================================================================================
+
+- Données historiques fixes (pas de mise à jour automatique)
+- Split temporel simple (pas de validation croisée temporelle multiple)
+- Modèle ARIMA-GARCH univarié (pas de modèles multivariés)
+- LightGBM uniquement (pas d'autres modèles ML comparés)
+- Prévisions à court terme (1 jour d'horizon principalement)
+- Pas de gestion explicite des régimes de marché (bull/bear)
+
+================================================================================
+12. TECHNOLOGIES UTILISÉES
+================================================================================
+
+- Python 3.10+
+- pandas, numpy : Manipulation de données
+- statsmodels : ARIMA
+- scikit-learn : LightGBM, métriques
+- optuna : Optimisation bayésienne
+- shap : Interprétabilité ML
+- matplotlib, seaborn : Visualisations
+- yfinance : Téléchargement de données
+- joblib : Sauvegarde de modèles
+
+================================================================================
+FIN DE LA DOCUMENTATION MÉTHODOLOGIQUE
+================================================================================
+

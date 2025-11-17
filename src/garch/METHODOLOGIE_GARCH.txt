@@ -1,0 +1,491 @@
+================================================================================
+                    MÉTHODOLOGIE GARCH - PRÉVISION DE VOLATILITÉ
+                               S&P 500 Forecasting
+================================================================================
+
+Ce document décrit la méthodologie utilisée pour modéliser et prévoir la
+volatilité du S&P 500 à l'aide de modèles GARCH (Generalized Autoregressive
+Conditional Heteroskedasticity).
+
+
+===============================================================================
+                              1. CONTEXTE ET OBJECTIF
+===============================================================================
+
+OBJECTIF PRINCIPAL
+------------------
+Prévoir la volatilité conditionnelle du S&P 500 à horizon h=1 (un jour) à
+partir des résidus d'un modèle ARIMA.
+
+POURQUOI GARCH?
+---------------
+Les rendements financiers présentent des "clusters de volatilité" : les
+périodes de forte volatilité tendent à être suivies de forte volatilité, et
+inversement. Les modèles GARCH capturent cette dynamique en modélisant la
+variance conditionnelle comme une fonction autoregressive.
+
+MODÈLE UTILISÉ : EGARCH
+-----------------------
+Le modèle EGARCH (Exponential GARCH, Nelson 1991) est choisi car :
+- Il capture l'effet de levier (asymétrie) : les chocs négatifs augmentent
+  plus la volatilité que les chocs positifs
+- Il garantit que la variance reste toujours positive (modélisation en log)
+- Plus flexible que le GARCH standard
+
+Équation EGARCH :
+    log(σ²ₜ) = ω + β·log(σ²ₜ₋₁) + α·(|zₜ₋₁| - κ) + γ·zₜ₋₁
+
+où :
+    - σ²ₜ : variance conditionnelle au temps t
+    - zₜ : résidu standardisé (εₜ/σₜ)
+    - ω, β, α, γ : paramètres à estimer
+    - κ = E[|Z|] dépend de la distribution (Normal, Student-t, Skew-t)
+
+
+===============================================================================
+                        2. ARCHITECTURE DU PIPELINE
+===============================================================================
+
+Le pipeline GARCH se décompose en 7 ÉTAPES principales :
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 0 : PRÉPARATION DES DONNÉES                                      │
+│  Module : (externe - ARIMA)                                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Modèle ARIMA entraîné sur les rendements du S&P 500                │
+│  • Extraction des résidus ARIMA (εₜ)                                  │
+│  • Création du dataset GARCH avec : date, split, returns, résidus      │
+│  • Sortie : data/processed/garch_dataset.csv                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 1 : DÉTECTION ARCH/GARCH                                         │
+│  Module : structure_garch/                                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Test ARCH-LM (Engle) : Teste la présence d'effets ARCH             │
+│  • ACF des résidus au carré : Identifie l'autocorrélation             │
+│  • Tests d'asymétrie (Engle-Ng) : Sign bias, size bias                │
+│  • Objectif : Confirmer qu'un modèle GARCH est approprié               │
+│  • Sortie : results/garch/structure/diagnostics.json                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 2a : ESTIMATION BATCH DES PARAMÈTRES                            │
+│  Module : garch_params/estimation_batch.py                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Estimation MLE (Maximum Likelihood) pour 3 distributions :          │
+│    - Normal                                                             │
+│    - Student-t (capture queues épaisses)                               │
+│    - Skew-t (capture asymétrie et queues épaisses)                     │
+│  • Modèle : EGARCH(1,1) sur données TRAIN                              │
+│  • Méthode : L-BFGS-B avec contraintes de stationnarité               │
+│  • Sortie : results/garch/estimation/estimation.json                   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 2b : OPTIMISATION DES HYPERPARAMÈTRES                           │
+│  Module : garch_params/optimization/                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Recherche des hyperparamètres optimaux via Optuna :                 │
+│    - Orders EGARCH : (o, p) ∈ {(1,1), (1,2), (2,1), (2,2), ...}       │
+│    - Distribution : {Normal, Student-t, Skew-t}                        │
+│    - Fréquence de refit : {5, 10, 20, 30, 60 jours}                   │
+│    - Type de fenêtre : {expanding, rolling}                            │
+│    - Taille fenêtre (si rolling) : {500, 1000 observations}            │
+│                                                                         │
+│  • Validation : Walk-forward cross-validation sur TRAIN                │
+│    - Split temporel : 30% burn-in + 70% validation                    │
+│    - Métrique : QLIKE (Quasi-Likelihood) out-of-sample                │
+│                                                                         │
+│  • QLIKE = moyenne[(ε²ₜ/σ²ₜ) - log(ε²ₜ/σ²ₜ) - 1]                      │
+│                                                                         │
+│  • Sortie : results/garch/optimization/optimization_results.json       │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 3 : ENTRAÎNEMENT FINAL                                           │
+│  Module : training_garch/                                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Utilise les hyperparamètres optimaux de l'étape 2b                 │
+│                                                                         │
+│  • TRAIN : Forecasts avec fenêtre expanding + refit périodique         │
+│    - À chaque pas t, forecast σ²_{t+1|t} (volatilité 1 jour ahead)    │
+│    - Refit du modèle tous les N jours (N = fréquence optimale)        │
+│    - Fenêtre expanding : utilise toutes les données depuis le début   │
+│                                                                         │
+│  • TEST : Forecasts depuis le modèle entraîné sur TRAIN                │
+│    - Continue les prévisions sans refit                                │
+│    - Préserve la séparation temporelle stricte (anti-leakage)         │
+│                                                                         │
+│  • Sortie : results/garch/evaluation/garch_forecasts.parquet           │
+│    Colonnes : date, split, garch_forecast_h1, garch_vol_h1,           │
+│               forecast_type, refit_occurred                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 4 : ÉVALUATION                                                   │
+│  Module : garch_eval/                                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Métriques de variance (sur split TEST) :                            │
+│    - QLIKE (Quasi-Likelihood)                                          │
+│    - MSE variance (Mean Squared Error)                                 │
+│    - MAE variance (Mean Absolute Error)                                │
+│                                                                         │
+│  • Backtests VaR (Value-at-Risk) :                                     │
+│    - Niveaux testés : 1%, 5%                                           │
+│    - Tests : Unconditional Coverage, Independence, Conditional Coverage│
+│    - Comparaison hit rate observé vs théorique                         │
+│                                                                         │
+│  • Calibration Mincer-Zarnowitz :                                      │
+│    - Régression : ε²ₜ = α + β·σ²_{t|t-1} + uₜ                         │
+│    - Test H0 : α=0 et β=1 (calibration parfaite)                      │
+│    - R² de calibration                                                 │
+│                                                                         │
+│  • Visualisations :                                                     │
+│    - Forecasts vs volatilité réalisée                                  │
+│    - Distribution des résidus standardisés                             │
+│    - QQ plots                                                          │
+│                                                                         │
+│  • Sortie : results/garch/evaluation/metrics.json + plots/             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 5 : DIAGNOSTICS POST-ESTIMATION                                  │
+│  Module : garch_diagnostic/                                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Tests sur résidus standardisés (zₜ = εₜ/σₜ) :                      │
+│    - ACF/PACF : doivent montrer absence d'autocorrélation             │
+│    - Ljung-Box : test de blancheur (p-value > 0.05 attendu)           │
+│    - Moments : E[zₜ]≈0, Var[zₜ]≈1                                     │
+│                                                                         │
+│  • Tests sur résidus standardisés au carré (z²ₜ) :                    │
+│    - ACF/PACF : pas d'autocorrélation résiduelle                      │
+│    - Ljung-Box : absence d'effet ARCH résiduel                        │
+│                                                                         │
+│  • Tests de distribution :                                             │
+│    - QQ plots (Normal, Student-t)                                      │
+│    - Jarque-Bera (test de normalité)                                  │
+│    - Kolmogorov-Smirnov                                                │
+│                                                                         │
+│  • Tests avancés :                                                      │
+│    - ARCH-LM sur zₜ (ne doit pas rejeter H0)                          │
+│    - Engle-Ng asymmetry tests                                          │
+│    - Nyblom stability test (stabilité des paramètres)                 │
+│                                                                         │
+│  • Sortie : results/garch/diagnostic/                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ÉTAPE 6 : INTÉGRATION FINALE                                           │
+│  Module : garch_eval/main.py                                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│  • Fusion des forecasts GARCH avec data_tickers                        │
+│  • Création du fichier final : data_tickers_full_insights.csv          │
+│  • Contient : données brutes + prédictions ARIMA + volatilité GARCH   │
+│  • Utilisé comme input pour le modèle LightGBM (étape suivante)        │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+===============================================================================
+                     3. CONCEPTS CLÉS DE LA MÉTHODOLOGIE
+===============================================================================
+
+3.1. VOLATILITÉ RÉALISÉE (Realized Volatility)
+-----------------------------------------------
+La "vraie" volatilité est inobservable. On utilise des proxy basés sur les
+rendements ou les prix HLOC (High-Low-Open-Close).
+
+Estimateurs implémentés :
+- Classical RV : Variance réalisée (somme des rendements au carré)
+- Parkinson (1980) : Utilise le range High-Low
+- Garman-Klass (1980) : Combine HLOC, plus efficace
+- Rogers-Satchell (1991) : Indépendant du drift
+- Yang-Zhang (2000) : Le plus efficace, combine overnight et intraday
+
+Module : realized_volatility.py
+
+
+3.2. REFIT PÉRIODIQUE
+----------------------
+Les marchés changent de régime au fil du temps. Le refit périodique permet
+d'adapter les paramètres du modèle GARCH à l'évolution des conditions de marché.
+
+Stratégies de fenêtre :
+- EXPANDING : Utilise toutes les données depuis le début (fenêtre croissante)
+- ROLLING : Utilise une fenêtre glissante de taille fixe (ex: 1000 obs)
+
+Fréquence de refit : Déterminée par optimisation (ex: tous les 20 jours)
+
+
+3.3. PRÉVENTION DU DATA LEAKAGE
+--------------------------------
+CRUCIAL pour garantir que les prévisions sont réalistes et utilisables en
+production. Mesures anti-leakage :
+
+1. Split temporel strict : TRAIN avant TEST, pas de mélange
+2. Forecasts h=1 causaux : σ²_{t+1|t} utilise seulement données jusqu'à t
+3. Jamais de variance filtrée σ²_{t|t} (serait du leakage)
+4. Walk-forward CV : Validation temporelle, pas de K-fold standard
+5. Initialization anti-leakage : Variance initiale basée sur 10 premiers résidus
+6. Refit causal : Le refit utilise uniquement données passées
+
+
+3.4. MÉTRIQUES D'ÉVALUATION
+----------------------------
+
+QLIKE (Quasi-Likelihood)
+------------------------
+Métrique standard pour évaluer les prévisions de volatilité.
+
+    QLIKE = (1/T) Σ [(ε²ₜ/σ²ₜ) - log(ε²ₜ/σ²ₜ) - 1]
+
+- Symétrique en log
+- Pénalise sur-estimation et sous-estimation
+- Plus bas = meilleur
+
+MSE et MAE Variance
+-------------------
+- MSE_var = (1/T) Σ (ε²ₜ - σ²ₜ)²
+- MAE_var = (1/T) Σ |ε²ₜ - σ²ₜ|
+
+VaR Backtests
+-------------
+Teste si les intervalles de confiance sont bien calibrés.
+
+Pour α = 5% :
+- Hit rate observé devrait être ≈ 5%
+- Tests : Unconditional Coverage, Independence, Conditional Coverage
+
+Calibration Mincer-Zarnowitz
+-----------------------------
+Régression : ε²ₜ = α + β·σ²_{t|t-1} + uₜ
+
+Calibration parfaite si :
+- α = 0 (pas de biais)
+- β = 1 (prédictions non biaisées)
+- R² élevé (bon pouvoir prédictif)
+
+
+===============================================================================
+                          4. STRUCTURE DES MODULES
+===============================================================================
+
+src/garch/
+│
+├── __init__.py                      # Exports des fonctions principales
+├── realized_volatility.py           # Estimateurs académiques HLOC
+│
+├── structure_garch/                 # ÉTAPE 1 : Détection ARCH/GARCH
+│   ├── main.py                      # CLI
+│   ├── detection.py                 # Tests ARCH-LM, ACF(ε²)
+│   └── utils.py                     # Chargement données, tests Engle-Ng
+│
+├── garch_params/                    # ÉTAPE 2 : Estimation & Optimisation
+│   ├── core/                        # Fonctions de base
+│   │   ├── variance.py              # Calcul variance conditionnelle
+│   │   ├── distributions.py         # E[|Z|] pour Normal, Student, Skew-t
+│   │   ├── initialization.py        # Init paramètres
+│   │   └── validation.py            # Contraintes stationnarité
+│   │
+│   ├── models.py                    # Classe EGARCHParams
+│   │
+│   ├── estimation/                  # Estimation MLE
+│   │   ├── mle.py                   # Maximum Likelihood Estimation
+│   │   ├── convergence.py           # Gestion convergence
+│   │   └── initialization.py        # Valeurs initiales
+│   │
+│   ├── optimization/                # Optimisation hyperparamètres
+│   │   ├── optuna.py                # Recherche Optuna
+│   │   └── cross_validation.py      # Walk-forward CV
+│   │
+│   ├── refit/                       # Gestion refit périodique
+│   │   ├── refit_manager.py         # Manager refit
+│   │   ├── schedule.py              # Calendrier
+│   │   └── windows.py               # Fenêtres expanding/rolling
+│   │
+│   ├── estimation_batch.py          # Estimation batch (Normal, t, Skew-t)
+│   └── main.py                      # CLI principal
+│
+├── training_garch/                  # ÉTAPE 3 : Entraînement final
+│   ├── main.py                      # CLI
+│   ├── orchestration.py             # Génération forecasts full sample
+│   ├── forecaster.py                # Classe EGARCHForecaster
+│   ├── training.py                  # Entraînement modèle
+│   ├── predictions_io.py            # Sauvegarde prédictions
+│   └── utils.py                     # Utilitaires
+│
+├── garch_eval/                      # ÉTAPE 4 : Évaluation
+│   ├── main.py                      # CLI
+│   ├── eval.py                      # Évaluation complète
+│   ├── metrics.py                   # QLIKE, MSE, MAE
+│   ├── mz_calibration.py            # Calibration Mincer-Zarnowitz
+│   ├── data_loading.py              # Chargement données
+│   ├── plotting.py                  # Visualisations
+│   └── utils.py                     # Utilitaires
+│
+├── garch_diagnostic/                # ÉTAPE 5 : Diagnostics
+│   ├── main.py                      # CLI
+│   ├── diagnostics.py               # Tests de base (ACF, Ljung-Box)
+│   ├── advanced_diagnostics.py      # Tests avancés (ARCH-LM, Nyblom)
+│   ├── standardization.py           # Standardisation résidus
+│   ├── data_loading.py              # Chargement données
+│   ├── plotting.py                  # Visualisations
+│   └── io_utils.py                  # I/O
+│
+├── garch_data_visualisation/        # Visualisation données
+│   ├── main.py                      # CLI
+│   ├── plots.py                     # Plots clustering, ACF
+│   └── utils.py                     # Utilitaires
+│
+│   ├── statistical_tests.py         # Diebold-Mariano, MCS
+│   ├── forecasts.py                 # Génération forecasts
+│   ├── metrics.py                   # Métriques
+│   ├── validation.py                # Validation
+│   ├── data_utils.py                # Utilitaires données
+│   └── plotting.py                  # Visualisations
+│
+└── garch_numerical_test/            # Tests numériques
+    └── test_garch_numerical.py      # Validation implémentation
+
+
+===============================================================================
+                       5. CIRCULATION DES DONNÉES
+===============================================================================
+
+FLOW COMPLET :
+
+1. DATA SOURCES
+   └─> yfinance API : Prix OHLC S&P 500 + tickers
+
+2. DATA PREPARATION (modules externes)
+   └─> Cleaning, filtering, weighted returns
+
+3. ARIMA MODEL
+   └─> ARIMA fit → résidus εₜ
+
+4. GARCH DATASET (Input)
+   Fichier : data/processed/garch_dataset.csv
+   Colonnes : date, split, weighted_log_return, arima_resid,
+              arima_fitted_in_sample
+
+5. GARCH PIPELINE (ce module)
+   ├─> Structure detection
+   ├─> Parameter estimation
+   ├─> Hyperparameter optimization
+   └─> Training with refit
+
+6. GARCH FORECASTS (Output)
+   Fichier : results/garch/evaluation/garch_forecasts.parquet
+   Colonnes : date, split, garch_forecast_h1, garch_vol_h1,
+              forecast_type, refit_occurred
+
+7. DATA TICKERS FULL INSIGHTS (Final)
+   Fichier : data/processed/data_tickers_full_insights.csv
+   Contenu : Données brutes + ARIMA + GARCH
+   Usage : Input pour LightGBM
+
+
+===============================================================================
+                         6. UTILISATION PRATIQUE
+===============================================================================
+
+EXÉCUTION DU PIPELINE COMPLET :
+
+# Étape 1 : Détection ARCH/GARCH
+python -m src.garch.structure_garch.main
+
+# Étape 2a : Estimation batch
+python -m src.garch.garch_params.main --stage estimation
+
+# Étape 2b : Optimisation hyperparamètres
+python -m src.garch.garch_params.main --stage optimization
+
+# Étape 3 : Entraînement final
+python -m src.garch.training_garch.main
+
+# Étape 4 : Évaluation
+python -m src.garch.garch_eval.main
+
+# Étape 5 : Diagnostics
+python -m src.garch.garch_diagnostic.main
+
+
+===============================================================================
+                         7. RÉFÉRENCES ACADÉMIQUES
+===============================================================================
+
+MODÈLES :
+- Engle (1982) : ARCH model
+- Bollerslev (1986) : GARCH(1,1)
+- Nelson (1991) : EGARCH
+- Glosten, Jagannathan, Runkle (1993) : GJR-GARCH
+
+TESTS & MÉTRIQUES :
+- Engle (1982) : ARCH-LM test
+- Ljung-Box (1978) : Test autocorrélation
+- Engle-Ng (1993) : Asymmetry tests
+- Mincer-Zarnowitz (1969) : Regression-based calibration
+- Diebold-Mariano (1995) : Comparaison de prévisions
+
+VOLATILITÉ RÉALISÉE :
+- Parkinson (1980) : Estimateur High-Low
+- Garman-Klass (1980) : Estimateur HLOC
+- Rogers-Satchell (1991) : Estimateur sans drift
+- Yang-Zhang (2000) : Estimateur combiné overnight-intraday
+
+MODÈLES DE RÉFÉRENCE :
+- RiskMetrics (1996) : EWMA
+- Corsi (2009) : HAR-RV
+
+
+===============================================================================
+                           8. POINTS IMPORTANTS
+===============================================================================
+
+✓ Anti-leakage strict : Split temporel uniquement, forecasts h=1 causaux
+✓ Refit périodique : Adaptation aux changements de régime
+✓ Validation rigoureuse : Walk-forward CV, métriques académiques
+✓ Diagnostics complets : Tests statistiques standards
+✓ Robustesse : Tests numériques, gestion des edge cases
+✓ Traçabilité : Tous les résultats sauvegardés avec métadonnées
+
+
+===============================================================================
+                              9. LIMITATIONS
+===============================================================================
+
+1. Hypothèse de stationnarité : Les paramètres changent au fil du temps
+   (d'où le refit périodique)
+
+2. Horizon h=1 uniquement : Prévisions multi-horizons nécessiteraient
+   simulation ou modèles alternatifs
+
+3. Univarié : Ne capture pas les corrélations entre actifs (nécessiterait
+   modèles multivariés comme DCC-GARCH)
+
+4. Linéarité conditionnelle : Les modèles GARCH restent linéaires dans les
+   moments conditionnels
+
+5. Distribution paramétrique : Hypothèse de distribution (Normal, Student-t,
+   Skew-t) peut être restrictive
+
+
+===============================================================================
+                         10. ÉVOLUTIONS POSSIBLES
+===============================================================================
+
+• Modèles alternatifs : GJR-GARCH, TGARCH, FIGARCH (long memory)
+• Multivarié : DCC-GARCH, BEKK pour portefeuilles
+• Realized GARCH : Intégrer estimateurs réalisés dans équation
+• Machine Learning : LSTM-GARCH, Neural Network-GARCH hybrids
+• Horizons multiples : h > 1 forecasts
+• Distributions non-paramétriques : Kernel-based, copulas
+
+
+================================================================================
+                                  FIN
+================================================================================
+
+Auteur : Pipeline S&P500 Forecasting
+Date : 2025
+Version : 1.0

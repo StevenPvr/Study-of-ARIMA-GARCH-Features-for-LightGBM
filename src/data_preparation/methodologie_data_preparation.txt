@@ -1,0 +1,98 @@
+# Méthodologie de Préparation des Données S&P 500
+
+## Objectif
+
+Le module `data_preparation` transforme les données nettoyées en features exploitables par les modèles de machine learning. Il crée des variables explicatives (features) à partir des données OHLCV individuelles des tickers, en se concentrant sur les métriques de momentum, volatilité et liquidité.
+
+## Sous-modules actifs
+
+- `data_preparation.py` : Fonction principale et orchestration
+- `computations.py` : Calculs des features techniques (momentum, volatilité, etc.)
+- `ticker_preparation.py` : Préparation individuelle des tickers
+- `timeseriessplit.py` : Gestion des splits temporels pour validation
+- `main.py` : Interface CLI
+
+## Déroulé du pipeline (`prepare_data`)
+
+1. **Chargement et validation**
+   - Lecture du dataset nettoyé (`dataset_filtered.parquet`)
+   - Validation des colonnes requises et types de données
+   - Contrôle de la complétude temporelle
+
+2. **Calcul des features par ticker**
+   - **Rendements** : Log-returns quotidiens et cumulés
+   - **Volatilité** : Écart-type mobile sur différentes fenêtres
+   - **Momentum** : Tendance sur courtes/moyennes périodes
+   - **Liquidité** : Volume relatif et capitalisation
+
+3. **Agrégation temporelle**
+   - Regroupement par date pour créer des features cross-sectionnelles
+   - Statistiques de distribution (moyenne, médiane, quantiles)
+   - Mesures de dispersion et concentration
+
+4. **Création des targets**
+   - Rendements futurs (1 jour, 1 semaine, 1 mois)
+   - Classes binaires (hausse/baisse) avec seuils configurables
+   - Targets multi-classes pour stratégies plus sophistiquées
+
+5. **Split train/validation/test**
+   - Division temporelle respectant l'ordre chronologique
+   - Ratios configurables (défaut : 70%/15%/15%)
+   - Sauvegarde séparée des splits
+
+## Features créées
+
+### Features individuels (par ticker)
+- `log_return_1d` : Rendement logarithmique quotidien
+- `volatility_5d`, `volatility_20d` : Volatilité mobile
+- `momentum_5d`, `momentum_20d` : Momentum relatif
+- `volume_ratio` : Volume relatif à la moyenne
+
+### Features agrégés (marché)
+- `market_return` : Rendement moyen du marché
+- `market_volatility` : Volatilité moyenne pondérée
+- `ticker_count` : Nombre de tickers actifs
+
+### Features temporels
+- `day_of_week` : Encodage du jour de la semaine
+- `month_of_year` : Encodage du mois
+- `quarter` : Trimestre de l'année
+
+## Principes méthodologiques clés
+
+### Absence de fuite de données (No Data Leakage)
+- Toutes les features utilisent uniquement des données passées
+- Pas d'utilisation de `shift(-1)` pour les targets
+- Validation stricte des fenêtres temporelles
+
+### Robustesse statistique
+- Gestion des valeurs extrêmes (winsorization)
+- Normalisation par z-score ou robuste
+- Validation des distributions
+
+### Modularité
+- Séparation claire : calculs → agrégation → targets → splits
+- Tests unitaires pour chaque étape
+- Configuration centralisée via `constants.py`
+
+## Tests automatisés
+
+- Tests unitaires sur les calculs de features
+- Tests d'intégration pour le pipeline complet
+- Validation de l'absence de fuite de données
+- Tests de performance sur gros volumes
+
+## Points de vigilance
+
+- **Complexité computationnelle** : Features calculées sur de gros volumes
+- **Mémorisation** : Utilisation efficace de pandas groupby/rolling
+- **Évolutivité** : Architecture permettant l'ajout de nouvelles features
+- **Interprétabilité** : Features avec signification économique claire
+
+## Sortie
+
+Le module produit des datasets ML-ready :
+- Format : Features tabulaires avec targets temporels
+- Structure : X_train/val/test.npy, y_train/val/test.npy
+- Caractéristiques : Normalisées, sans NaN, prêtes pour l'entraînement
+- Métadonnées : Configuration des features et splits sauvegardée

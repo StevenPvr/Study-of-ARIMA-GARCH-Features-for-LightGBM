@@ -1,0 +1,75 @@
+# Méthodologie de Conversion des Données S&P 500
+
+## Objectif
+
+Le module `data_conversion` transforme les données OHLCV individuelles des tickers en séries temporelles agrégées pondérées par la liquidité. Cette étape cruciale calcule les rendements logarithmiques pondérés du portefeuille S&P 500 sans biais d'anticipation (no-look-ahead bias).
+
+## Sous-modules actifs
+
+- `data_conversion.py` : Fonction principale `convert_to_weighted_log_returns()` et logique d'agrégation
+- `utils.py` : Fonctions utilitaires pour validation, calculs de poids et normalisation
+- `main.py` : Interface CLI pour l'exécution
+
+## Déroulé du pipeline (`convert_to_weighted_log_returns`)
+
+1. **Validation des entrées**
+   - Vérification de l'existence du fichier source (`dataset_filtered.parquet`)
+   - Validation des colonnes requises : `date`, `ticker`, `open`, `close`, `volume`
+   - Contrôle que le DataFrame n'est pas vide
+
+2. **Calcul des rendements individuels**
+   - Calcul des rendements logarithmiques quotidiens pour chaque ticker : `log(close_t / close_{t-1})`
+   - Utilisation de la fonction `compute_log_returns` du module utils
+
+3. **Calcul des poids de liquidité**
+   - Fenêtre glissante de 252 jours (1 an) pour calculer les poids
+   - Poids basés sur la capitalisation moyenne sur la fenêtre (prix × volume)
+   - **Anti-biais d'anticipation** : Exclusion de l'observation courante du calcul des poids
+   - Normalisation pour que la somme des poids égale 1
+
+4. **Agrégation pondérée**
+   - Combinaison des rendements individuels avec les poids de liquidité
+   - Calcul du rendement pondéré du portefeuille : `Σ(rendement_ticker × poids_ticker)`
+   - Génération d'une série temporelle univariée
+
+5. **Sauvegarde et export**
+   - Export en CSV et Parquet : `weighted_log_returns.csv/parquet`
+   - Journalisation des métriques : nombre de tickers, période couverte, statistiques descriptives
+
+## Principes méthodologiques clés
+
+### Anti-biais d'anticipation (No Look-Ahead Bias)
+- Les poids sont calculés uniquement avec les données passées
+- La valeur du jour courant n'influence pas son propre poids
+- Simule un scénario de trading réaliste où les poids sont connus à l'avance
+
+### Poids de liquidité
+- Basés sur la capitalisation moyenne (prix × volume moyen)
+- Fenêtre glissante adaptative (défaut : 252 jours)
+- Normalisation automatique pour maintenir Σ(poids) = 1
+
+### Robustesse temporelle
+- Gestion des tickers absents (poids redistribués)
+- Validation des sommes de poids (tolérance numérique)
+- Tri chronologique pour garantir l'ordre temporel
+
+## Tests automatisés
+
+- Tests unitaires sur les calculs de poids et rendements
+- Tests d'intégration pour le pipeline complet
+- Tests de robustesse avec données manquantes/corrompues
+- Validation des propriétés statistiques (somme des poids = 1)
+
+## Points de vigilance
+
+- **Performance** : Calculs vectorisés pour gérer de gros volumes de données
+- **Mémoire** : Utilisation efficace de pandas pour les opérations groupées
+- **Reproductibilité** : Paramètres centralisés dans `constants.py`
+- **Extensibilité** : Architecture modulaire pour ajouter de nouveaux schémas de pondération
+
+## Sortie
+
+Le module produit une série temporelle univariée prête pour la modélisation ARIMA/GARCH :
+- Format : Date × Rendement pondéré logarithmique
+- Fréquence : Quotidienne (jours ouvrés)
+- Propriétés : Rendements continus, pondérés par liquidité, sans biais d'anticipation

@@ -1,0 +1,398 @@
+================================================================================
+                    MÉTHODOLOGIE DU MODULE ARIMA
+            Prévision des Rendements Pondérés du S&P 500
+================================================================================
+
+OBJECTIF GÉNÉRAL
+----------------
+Ce module implémente une analyse de séries temporelles complète utilisant le
+modèle ARIMA (AutoRegressive Integrated Moving Average) pour
+prédire les rendements logarithmiques pondérés du portefeuille S&P 500.
+
+
+ARCHITECTURE DU PIPELINE
+------------------------
+Le pipeline se compose de 5 étapes séquentielles, chacune produisant des
+résultats utilisés par l'étape suivante :
+
+    Données → Stationnarité → Visualisation → Optimisation → Entraînement → Évaluation
+
+
+================================================================================
+ÉTAPE 1 : VÉRIFICATION DE LA STATIONNARITÉ
+================================================================================
+
+OBJECTIF
+--------
+Vérifier que les données respectent les hypothèses du modèle ARIMA, notamment
+que la série temporelle est stationnaire (moyenne et variance constantes).
+
+MÉTHODOLOGIE
+------------
+• Agrégation hebdomadaire : Les rendements quotidiens sont sommés par semaine
+  pour réduire le bruit et stabiliser les statistiques
+
+• Triple test statistique :
+  1. Test ADF (Augmented Dickey-Fuller) : Détecte la présence d'une racine
+     unitaire (non-stationnarité)
+
+  2. Test KPSS (Kwiatkowski-Phillips-Schmidt-Shin) : Teste la stationnarité
+     autour d'une tendance
+
+  3. Test de Zivot-Andrews : Identifie les ruptures structurelles dans la série
+     (changements de régime économique)
+
+• Verdict de stationnarité : La série est considérée stationnaire si :
+  - Le test ADF rejette l'hypothèse de racine unitaire (p-value < 0.05)
+  - ET le test KPSS accepte l'hypothèse de stationnarité (p-value > 0.05)
+
+RÉSULTATS
+---------
+Rapport JSON contenant les p-values de chaque test et le verdict final.
+
+
+================================================================================
+ÉTAPE 2 : VISUALISATION EXPLORATOIRE
+================================================================================
+
+OBJECTIF
+--------
+Générer des graphiques permettant de comprendre visuellement les
+caractéristiques de la série temporelle.
+
+VISUALISATIONS PRODUITES
+-------------------------
+1. Série temporelle des rendements logarithmiques hebdomadaires
+
+2. Fonctions d'autocorrélation (ACF/PACF) :
+   - ACF : Corrélation entre la série et ses valeurs passées
+   - PACF : Corrélation directe (sans influence des lags intermédiaires)
+   - Ces graphiques guident le choix des ordres p et q du modèle
+
+3. Analyse de stationnarité :
+   - Moyenne mobile et écart-type mobile sur fenêtres glissantes
+   - Visualisation de la stabilité temporelle
+
+4. Décomposition saisonnière :
+   - Séparation de la série en tendance, saisonnalité et résidus
+   - Analyse sur plusieurs échelles temporelles (quotidienne, mensuelle)
+
+UTILITÉ
+-------
+Ces visualisations permettent une validation qualitative des tests statistiques
+et une compréhension intuitive des patterns temporels.
+
+
+================================================================================
+ÉTAPE 3 : OPTIMISATION DES HYPERPARAMÈTRES
+================================================================================
+
+OBJECTIF
+--------
+Trouver la meilleure configuration de paramètres pour le modèle ARIMA.
+
+PARAMÈTRES OPTIMISÉS
+--------------------
+Le modèle ARIMA(p,d,q) possède 4 hyperparamètres principaux :
+
+• p : Ordre autorégressif (combien de valeurs passées utiliser)
+• d : Ordre de différenciation (rendre la série stationnaire)
+• q : Ordre moyenne mobile (combien d'erreurs passées utiliser)
+• trend : Paramètre de tendance ("n", "c", "t", "ct")
+
+Plus un paramètre de fréquence de ré-entraînement (refit_every) qui contrôle
+la fréquence de mise à jour du modèle lors des prédictions glissantes.
+
+ESPACES DE RECHERCHE (ÉVIDENCE-BASED)
+------------------------------------
+Basés sur la littérature financière (Box & Jenkins, Tsay, études empiriques) :
+- p : [0, 3] - Série financières typiquement short-memory
+- d : [0, 1] - Différenciation limitée pour éviter l'over-differencing
+- q : [0, 3] - MA component conservateur pour données financières
+- trend : {"n", "c", "t", "ct"} - "n"=no constant, "c"=constant, "t"=trend, "ct"=constant+trend
+- refit_every : {1, 5, 15, 21, 63} - Fréquences de ré-entraînement optimisées
+
+MÉTHODOLOGIE D'OPTIMISATION
+----------------------------
+• Algorithme : Optimisation bayésienne via Optuna (TPE - Tree-structured
+  Parzen Estimator)
+
+• Critère d'optimisation unique : AIC (Akaike Information Criterion)
+  - AIC est théoriquement optimal pour la prévision one-step-ahead
+  - Formule : -2*log(likelihood) + 2*k (où k = nombre de paramètres)
+  - BIC supprimé car il optimise la description de longueur, pas l'erreur de prévision
+
+• Nombre d'essais : 10 par défaut (configurable via constantes)
+  - Recherche systématique dans l'espace de paramètres evidence-based
+  - Reproductibilité assurée par seed fixe (DEFAULT_RANDOM_STATE = 42)
+
+• Validation des résidus : Test de Ljung-Box utilisé comme filtre de qualité
+  (modèles avec p-value >= 0.05 privilégiés)
+
+• Validation croisée temporelle : Walk-forward validation avec métriques
+  RMSE/MAE pour évaluation de robustesse (pas utilisé pour optimisation)
+
+• Contraintes de stabilité : Vérification de stationnarité et invertibilité
+  des paramètres (racines des polynômes AR/MA hors du cercle unité)
+
+PRINCIPE CLÉ
+------------
+L'optimisation utilise exclusivement AIC pour sa supériorité théorique dans
+la prévision one-step-ahead. La validation croisée temporelle walk-forward
+teste la robustesse du modèle sur différentes périodes sans influencer
+la sélection des hyperparamètres.
+
+EXÉCUTION AUTOMATIQUE
+---------------------
+Le module fonctionne automatiquement sans paramètres CLI :
+- Valeurs par défaut issues des constantes du projet
+- Fichier de données : WEIGHTED_LOG_RETURNS_SPLIT_FILE
+- Colonne cible : "weighted_log_return"
+- Fréquence de ré-entraînement : première valeur de ARIMA_REFIT_EVERY_OPTIONS
+
+RÉSULTATS
+---------
+- Fichier CSV avec tous les essais d'optimisation
+- JSON avec le meilleur modèle (optimisé selon AIC uniquement)
+- Filtrage automatique des modèles par test de Ljung-Box (qualité des résidus)
+
+
+================================================================================
+ÉTAPE 4 : ENTRAÎNEMENT DU MODÈLE FINAL
+================================================================================
+
+OBJECTIF
+--------
+Entraîner le modèle ARIMA avec les meilleurs hyperparamètres trouvés.
+
+MÉTHODOLOGIE
+------------
+1. Chargement des meilleurs paramètres (choix entre critère AIC ou BIC)
+2. Entraînement du modèle sur l'ensemble d'entraînement complet
+3. Sauvegarde du modèle entraîné (format pickle)
+4. Sauvegarde des métadonnées (paramètres, critères, date)
+
+ANTI-FUITE DE DONNÉES
+----------------------
+Le modèle est entraîné UNIQUEMENT sur le split d'entraînement. Aucune
+information du set de test n'est utilisée.
+
+RÉSULTATS
+---------
+- Modèle entraîné prêt pour l'évaluation
+- Métadonnées pour traçabilité et reproductibilité
+
+
+================================================================================
+ÉTAPE 5 : ÉVALUATION ET DIAGNOSTICS
+================================================================================
+
+OBJECTIF
+--------
+Évaluer rigoureusement la performance du modèle et diagnostiquer sa qualité.
+
+MÉTHODOLOGIE D'ÉVALUATION
+--------------------------
+
+1. PRÉVISIONS GLISSANTES (Rolling Forecast)
+   ----------------------------------------
+   • Principe : Prévisions à un pas en avant sur l'ensemble de test
+
+   • Ré-entraînement périodique : Le modèle est réajusté tous les 20 points
+     pour s'adapter à l'évolution de la série
+
+   • Métriques calculées :
+     - MSE (Mean Squared Error) : Erreur quadratique moyenne
+     - RMSE (Root Mean Squared Error) : Racine de l'erreur quadratique moyenne
+     - MAE (Mean Absolute Error) : Erreur absolue moyenne
+
+   • Avantage : Simule un scénario de trading réaliste avec mises à jour régulières
+
+
+2. VALIDATION CROISÉE TEMPORELLE (Walk-Forward)
+   ---------------------------------------------
+   • Principe : Validation croisée respectant l'ordre temporel (pas de mélange)
+
+   • Configuration :
+     - 5 splits temporels
+     - Taille de test fixe : 21 jours par split
+     - Expansion de l'ensemble d'entraînement à chaque split
+
+   • Avantage : Estimation robuste de la performance sur différentes périodes
+
+
+3. ANALYSE DES RÉSIDUS
+   --------------------
+   Les résidus doivent se comporter comme un bruit blanc pour valider le modèle.
+
+   Tests effectués :
+
+   • Test de Ljung-Box :
+     - Hypothèse : Les résidus ne sont pas autocorrélés
+     - Interprétation : p-value > 0.05 → résidus valides
+
+   • Tests de normalité (Jarque-Bera, Shapiro-Wilk, Anderson-Darling) :
+     - Hypothèse : Les résidus suivent une loi normale
+     - Importance : Validité des intervalles de confiance
+
+   • Graphique ACF des résidus :
+     - Visualisation : Les barres doivent rester dans les bandes de confiance
+     - Indication : Pas de structure temporelle restante
+
+
+4. PRÉPARATION POUR GARCH
+   -----------------------
+   • Extraction des résidus standardisés
+
+   • Calcul des prévisions glissantes
+
+   • Sauvegarde pour le module de modélisation de la volatilité
+
+   • Principe : Les résidus ARIMA servent d'entrée au modèle GARCH qui
+     modélise leur volatilité conditionnelle
+
+
+RÉSULTATS
+---------
+- Métriques de performance quantitatives
+- Graphiques de diagnostics
+- Tests statistiques sur les résidus
+- Données préparées pour l'étape suivante (GARCH)
+
+
+================================================================================
+PRINCIPES MÉTHODOLOGIQUES CLÉS
+================================================================================
+
+1. ABSENCE DE FUITE DE DONNÉES (No Data Leakage)
+   ----------------------------------------------
+   Séparation stricte train/test maintenue à chaque étape. Le modèle ne voit
+   jamais les données de test pendant l'optimisation et l'entraînement.
+
+
+2. OPTIMISATION THÉORIQUEMENT FONDÉE
+   ----------------------------------
+   Utilisation exclusive d'AIC pour l'optimisation (théoriquement optimal pour
+   la prévision one-step-ahead) plutôt que métriques de performance qui peuvent
+   favoriser le surapprentissage à des périodes spécifiques.
+
+
+3. VALIDATION TEMPORELLE
+   ----------------------
+   Toutes les validations respectent l'ordre chronologique (pas de mélange
+   aléatoire) car les séries temporelles ont une structure temporelle importante.
+
+
+4. CONTRAINTES DE STABILITÉ
+   --------------------------
+   Vérification automatique que les paramètres respectent les conditions
+   de stationnarité et invertibilité (pendant l'optimisation et l'évaluation).
+
+
+5. FILTRAGE QUALITÉ
+   -----------------
+   Sélection automatique des modèles dont les résidus passent le test
+   de Ljung-Box (absence d'autocorrélation résiduelle).
+
+6. REPRODUCTIBILITÉ
+   -----------------
+   Seeds aléatoires fixés, paramètres sauvegardés, pipeline modulaire permettant
+   de rejouer chaque étape indépendamment.
+
+7. INTÉGRATION PIPELINE
+   --------------------
+   Le module ARIMA s'intègre dans un pipeline plus large :
+   - Input : Données préparées par les modules upstream
+   - Output : Résidus pour modélisation GARCH de la volatilité
+   - Parallèle : Travaille en synergie avec LightGBM pour ensemble modeling
+
+
+================================================================================
+INTERPRÉTATION DES RÉSULTATS
+================================================================================
+
+CRITÈRES DE QUALITÉ D'UN BON MODÈLE ARIMA
+------------------------------------------
+
+1. AIC minimisé (critère d'optimisation principal)
+2. Respect des contraintes de stabilité (stationnarité/invertibilité)
+3. Résidus non autocorrélés (Test Ljung-Box : p > 0.05) - filtré automatiquement
+4. Résidus approximativement normaux (pour IC valides)
+5. RMSE faible et stable sur validation croisée temporelle walk-forward
+6. Paramètres interprétables (pas de surajustement avec p,q très élevés)
+7. Fréquence de ré-entraînement (refit_every) optimisée selon contexte d'usage
+8. **trend="n" recommandé** pour séries stationnaires de rendements (moyenne ≈ 0)
+
+SÉLECTION DU MODÈLE OPTIMAL
+---------------------------
+• Critère unique : AIC (théoriquement optimal pour la prévision)
+• Filtrage automatique : Seulement les modèles passant le test Ljung-Box
+• Validation temporelle : Walk-forward CV pour confirmer la robustesse
+• Refit frequency : Optimisé selon les besoins de production (1, 5, 15, 21, 63)
+
+
+LIMITES DU MODÈLE ARIMA
+------------------------
+• Suppose une relation linéaire entre passé et futur
+• Peut mal capturer les changements de régime abrupts
+• Hypothèse de normalité des erreurs parfois violée dans la finance
+• Volatilité constante (d'où l'utilisation de GARCH en complément)
+
+
+================================================================================
+CHANGEMENTS RÉCENTS ET AUTOMATISATION
+================================================================================
+
+MODIFICATIONS MAJEURES (2025)
+------------------------------
+
+1. SUPPRESSION DE L'OPTIMISATION BIC
+   ----------------------------------
+   • BIC supprimé de l'optimisation (seul AIC conservé)
+   • Justification : AIC théoriquement optimal pour la prévision one-step-ahead
+   • BIC reste calculé pour information mais n'influence pas la sélection
+
+2. AUTOMATISATION COMPLÈTE
+   ------------------------
+   • Suppression de tous les arguments en ligne de commande (CLI)
+   • Fonctionnement automatique avec valeurs par défaut des constantes
+   • Paramètres fixes :
+     - Fichier de données : WEIGHTED_LOG_RETURNS_SPLIT_FILE
+     - Colonne cible : "weighted_log_return"
+     - Refit frequency : ARIMA_REFIT_EVERY_OPTIONS[0] (valeur 1)
+     - Nombre d'essais : ARIMA_OPTIMIZATION_N_TRIALS (10)
+     - Nombre de splits : ARIMA_OPTIMIZATION_N_SPLITS (5)
+
+3. ESPACES DE RECHERCHE RÉVISÉS
+   -----------------------------
+   • Paramètres basés sur la littérature financière (evidence-based)
+   • p, q : [0, 3] au lieu de [0, 5] (short-memory pour séries financières)
+   • d : [0, 1] (différenciation conservative)
+   • trend : correction "nc" → "n" pour compatibilité statsmodels
+   • refit_every ajouté comme hyperparamètre optimisé
+
+4. SIMPLIFICATION DE L'ARCHITECTURE
+   ---------------------------------
+   • Fonction main() simplifiée (pas d'arguments CLI)
+   • Logging amélioré avec affichage des paramètres utilisés
+   • Reproductibilité renforcée avec constantes centralisées
+
+
+================================================================================
+CONCLUSION
+================================================================================
+
+Ce module implémente une méthodologie statistique rigoureuse pour la prévision
+de séries temporelles financières. L'approche combine :
+
+- Tests statistiques formels (stationnarité, diagnostics)
+- Optimisation bayésienne AIC-only (théoriquement fondée)
+- Validation temporelle sans fuite de données
+- Diagnostics complets des résidus
+- Exécution entièrement automatisée (pas de paramètres CLI)
+- Intégration dans un pipeline de prédiction plus large
+
+L'ensemble constitue un framework professionnel, automatisé et reproductible pour la
+modélisation ARIMA de séries financières avec optimisation evidence-based.
+
+================================================================================

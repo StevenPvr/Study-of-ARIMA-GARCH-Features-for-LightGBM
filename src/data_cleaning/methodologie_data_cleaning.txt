@@ -1,0 +1,50 @@
+# Méthodologie de Nettoyage des Données S&P 500
+
+## Objectif
+
+Le module `data_cleaning` s’assure que les données produites par `data_fetching` restent exploitables sans supprimer d’observations. Il applique des validations strictes, corrige les incohérences élémentaires et enregistre un dataset nettoyé prêt pour la préparation.
+
+## Sous-modules actifs
+
+- `validation.py` : charge le fichier brut, vérifie les colonnes requises et convertit `date` en datetime naïf (normalisation America/New_York).
+- `integrity.py` : supprime les doublons `(date, ticker)` et remplit les valeurs critiques manquantes avec 0.
+- `filtering.py` : gère l’écriture du jeu de données nettoyé en CSV et Parquet.
+- `data_cleaning.py` : expose `filter_by_membership` (pipeline principal) et la CLI.
+
+> Les anciens modules `analysis.py`, `metrics.py` et `filter_incomplete_tickers` ont été retirés. Toute tentative de les appeler lève `NotImplementedError` pour éviter toute ambiguïté.
+
+## Déroulé du pipeline (`filter_by_membership`)
+
+1. **Chargement et validation**
+   - Vérifie l’existence du fichier brut (`data/dataset.csv`) via `constants.py`.
+   - Contrôle la présence des colonnes `date`, `tickers`, `open`, `close`, `volume`.
+   - Convertit la colonne `date` en datetime (`utc=True`, tz-conversion New York, normalisation à minuit) et échoue si une valeur est invalide.
+
+2. **Intégrité des données**
+   - Suppression des doublons `(date, tickers)` avec journalisation du nombre supprimé.
+   - Remplissage ciblé des NaN dans `open`, `close`, `volume` avec 0 ; aucune autre colonne n’est modifiée.
+   - Aucun ajout de dates synthétiques : si un ticker est absent un jour donné, la ligne reste absente.
+   - Tri final par `tickers`, `date` pour stabiliser les traitements en aval.
+
+3. **Sauvegarde et rapports**
+   - Écrit `data/dataset_filtered.csv` et `data/dataset_filtered.parquet`.
+   - Logge les compteurs `duplicates_removed`, `missing_values_filled`, `missing_dates_filled` (ce dernier reste 0 pour compatibilité historique).
+
+## Principes clés
+
+- **Préservation** : aucun ticker supprimé ; les corrections privilégient la complétude.
+- **Transparence** : validations explicites, pas de fallback silencieux ; tout échec remonte une exception descriptive.
+- **Centralisation** : tous les chemins et paramètres viennent de `constants.py`, facilitant les tests (monkeypatch support).
+- **Simplicité** : pipeline linéaire (validation → intégrité → export) et fonction unique exposée côté CLI (`main.py` appelle `filter_by_membership`).
+
+## Tests automatisés
+
+- Tests unitaires couvrant la validation des colonnes, la conversion des dates timezone-aware et les corrections d’intégrité.
+- Tests d’intégration dans `tests/data_cleaning` (écriture disque, CLI).
+- Utilisation intensive de fixtures/mocks pour simuler les chemins, fichiers temporaires et DataFrames atypiques.
+
+## Points de vigilance
+
+- Si https://finance.yahoo.com livre des dates timezone-aware ou mixtes, la normalisation garantit que les comparaisons ultérieures restent correctes.
+- Toute modification du schéma (colonnes, types) doit être reportée dans `constants.REQUIRED_OHLCV_COLUMNS`, les tests et cette documentation.
+- En cas d’ajout d’étapes (ex : outliers), conserver l’ordre actuel et logguer explicitement les compteurs pour maintenir la traçabilité.

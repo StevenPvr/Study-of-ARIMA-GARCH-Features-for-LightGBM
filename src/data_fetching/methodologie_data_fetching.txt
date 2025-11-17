@@ -1,0 +1,94 @@
+# Méthodologie de Collecte des Données S&P 500
+
+## Objectif
+
+Le module `data_fetching` constitue la première étape du pipeline de données. Il récupère automatiquement la composition actuelle du S&P 500 depuis Wikipedia et télécharge les données OHLCV (Open, High, Low, Close, Volume) pour tous les tickers via Yahoo Finance.
+
+## Sous-modules actifs
+
+- `data_fetching.py` : Orchestration principale des opérations de collecte
+- `wikipedia.py` : Récupération et parsing de la liste des tickers S&P 500
+- `download.py` : Téléchargement parallèle des données de prix
+- `processing.py` : Nettoyage et standardisation des données brutes
+- `reporting.py` : Consolidation et sauvegarde finale
+- `main.py` : Interface CLI
+
+## Déroulé du pipeline (`fetch_all_data`)
+
+1. **Récupération de la liste des tickers**
+   - Scraping de la page Wikipedia "List of S&P 500 companies"
+   - Parsing HTML pour extraire les symboles boursiers
+   - Sauvegarde dans `data/sp500_tickers.csv`
+
+2. **Téléchargement des données de prix**
+   - Téléchargement parallèle via `yfinance` (Yahoo Finance)
+   - Plage temporelle configurable (défaut : 10 ans)
+   - Gestion des erreurs par ticker (retry automatique)
+   - Rate limiting pour éviter les blocages
+
+3. **Traitement et nettoyage**
+   - Standardisation des noms de colonnes
+   - Conversion des types de données (datetime, float)
+   - Suppression des lignes avec données manquantes critiques
+   - Validation de l'intégrité temporelle
+
+4. **Consolidation et sauvegarde**
+   - Fusion de tous les tickers dans un DataFrame unique
+   - Export en CSV et Parquet : `data/dataset.csv/parquet`
+   - Génération de rapports de qualité
+
+## Architecture technique
+
+### Téléchargement parallèle
+- Utilisation de `concurrent.futures.ThreadPoolExecutor`
+- Nombre de threads configurable (défaut : CPU count)
+- Gestion des timeouts et retry logic
+
+### Gestion d'erreurs robuste
+- Continuation du processus même si certains tickers échouent
+- Logging détaillé des erreurs par ticker
+- Métriques de succès/échec
+
+### Validation de données
+- Contrôle de la complétude temporelle
+- Détection des anomalies de prix (négatifs, extrêmes)
+- Vérification de la cohérence OHLC
+
+## Principes méthodologiques clés
+
+### Fiabilité
+- Sources officielles : Wikipedia pour la composition, Yahoo Finance pour les prix
+- Validation automatique de l'intégrité des données
+- Logs détaillés pour le debugging
+
+### Performance
+- Téléchargement parallèle pour réduire le temps total
+- Mise en cache des données déjà téléchargées
+- Traitement par batch pour gérer la mémoire
+
+### Maintenabilité
+- Séparation claire des responsabilités par sous-module
+- Configuration centralisée via `constants.py`
+- Interface CLI simple et documentée
+
+## Tests automatisés
+
+- Tests unitaires pour chaque fonction de parsing/validation
+- Tests d'intégration pour le pipeline complet
+- Mocks pour les appels réseau (Wikipedia, Yahoo Finance)
+- Tests de robustesse aux pannes réseau
+
+## Points de vigilance
+
+- **Évolution de la composition S&P 500** : Les tickers changent régulièrement
+- **Disponibilité des données** : Certains tickers peuvent être delistés
+- **Limites API** : Respect des quotas Yahoo Finance
+- **Cohérence temporelle** : Alignement des dates entre tickers
+
+## Sortie
+
+Le module produit un dataset complet prêt pour le nettoyage :
+- Format : Multi-ticker OHLCV (date, ticker, open, high, low, close, volume)
+- Couverture : Tous les tickers S&P 500 actifs
+- Période : Configurable (défaut : 10 ans)
+- Qualité : Données validées et nettoyées automatiquement

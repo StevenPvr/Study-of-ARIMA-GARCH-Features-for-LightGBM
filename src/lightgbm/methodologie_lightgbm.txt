@@ -1,0 +1,405 @@
+================================================================================
+MÉTHODOLOGIE DU MODULE LIGHTGBM
+Prédiction de la Volatilité Boursière par Machine Learning
+================================================================================
+
+================================================================================
+1. OBJECTIF GÉNÉRAL
+================================================================================
+
+Le module LightGBM prédit la volatilité future des actions du S&P 500 en
+utilisant un algorithme de gradient boosting (LightGBM). L'objectif est de
+prévoir la volatilité à J+1 (lendemain) en s'appuyant sur :
+- Des indicateurs techniques (volume, rendements, turnover)
+- Des insights GARCH (variance conditionnelle du modèle GARCH)
+- L'historique récent (lags de 1, 2 et 3 jours)
+
+================================================================================
+2. ARCHITECTURE ET FLUX DE TRAVAIL
+================================================================================
+
+Le processus se déroule en 5 phases séquentielles :
+
+   Données brutes
+        ↓
+   [1. Préparation des données]
+        ↓
+   [2. Analyse de corrélation] (optionnel)
+        ↓
+   [3. Optimisation des hyperparamètres]
+        ↓
+   [4. Entraînement des modèles]
+        ↓
+   [5. Évaluation et interprétabilité]
+
+================================================================================
+3. PHASE 1 : PRÉPARATION DES DONNÉES (data_preparation/)
+================================================================================
+
+Transforme les données brutes en 5 jeux de données prêts pour le machine learning.
+
+3.1 ÉTAPES DE PRÉPARATION
+--------------------------
+
+a) Chargement et normalisation
+   - Charge les données par ticker (action)
+   - Intègre les insights GARCH si disponibles
+   - Normalise les noms de colonnes
+   - Trie par ticker puis par date (ordre temporel crucial)
+
+b) Calcul des indicateurs techniques
+   - Volume : log_volume, volume relatif aux moyennes mobiles (5 et 20j),
+              z-scores de volume
+   - Rendements : log_return, valeur absolue, carré des rendements
+   - Turnover : volume × prix, relatif aux moyennes mobiles
+   - OBV (On-Balance Volume) : momentum basé sur le volume
+   - Calendrier : jour de la semaine, mois, fin de mois, position dans le mois
+
+c) Création de la cible (anti-fuite de données)
+   - Variable à prédire : log_volatility (volatilité logarithmique)
+   - DÉCALAGE CRUCIAL : Les features à la date t prédisent la cible à t+1
+   - Division temporelle : 80% train (dates anciennes) / 20% test (dates récentes)
+
+d) Ajout des lags (historique récent)
+   - Fenêtres : 1, 2 et 3 jours dans le passé
+   - Variables concernées :
+     * log_volatility, log_return, abs_ret, ret_sq
+     * Indicateurs de volume et turnover
+     * Insights GARCH : sigma2, sigma, résidus, prédictions ARIMA
+   - Groupement par ticker pour éviter la contamination entre actions
+
+e) Nettoyage final
+   - Suppression des valeurs manquantes
+   - Validation de l'ordre temporel
+   - Sauvegarde en Parquet (efficace) et CSV (lisible)
+
+3.2 LES 5 VARIANTES DE DATASETS
+--------------------------------
+
+Pour comprendre l'apport de chaque type de features, 5 datasets sont créés :
+
+1. COMPLET : Tous les indicateurs + insights GARCH + lags
+   → Modèle le plus riche
+
+2. SANS INSIGHTS : Uniquement indicateurs techniques + lags
+   → Évalue l'apport du GARCH
+
+3. SIGMA PLUS BASE : Insights GARCH + log_volatility avec lags
+   → Évalue l'apport des indicateurs techniques
+
+4. LOG VOLATILITY SEULEMENT : Baseline minimal avec uniquement log_volatility
+   → Modèle de référence (autocorrélation pure)
+
+5. INSIGHTS SEULEMENT : Uniquement insights GARCH/ARIMA + lags
+   → Évalue si GARCH seul suffit
+
+Ces variantes permettent des études d'ablation pour identifier les features
+les plus importantes.
+
+================================================================================
+4. PHASE 2 : ANALYSE DE CORRÉLATION (correlation/)
+================================================================================
+
+Analyse optionnelle pour comprendre les relations entre features.
+
+Méthodologie :
+- Calcul des corrélations de Spearman (robuste aux relations non-linéaires)
+- Génération de heatmaps pour chaque dataset
+- Visualisations haute résolution (300 DPI, 12x10 pouces)
+- Aide à identifier les features redondantes ou complémentaires
+
+================================================================================
+5. PHASE 3 : OPTIMISATION DES HYPERPARAMÈTRES (optimisation/)
+================================================================================
+
+Recherche les meilleurs hyperparamètres LightGBM via optimisation bayésienne.
+
+5.1 ESPACE DE RECHERCHE
+------------------------
+
+Paramètres optimisés :
+- num_leaves (31-256) : Complexité de l'arbre
+- max_depth (3-12) : Profondeur maximale
+- learning_rate (0.01-0.2) : Taux d'apprentissage
+- feature_fraction (0.6-1.0) : Proportion de features par arbre
+- bagging_fraction (0.6-1.0) : Proportion de samples par arbre
+- bagging_freq (0-7) : Fréquence du bagging
+- min_child_samples (20-200) : Taille minimale des feuilles
+- reg_alpha (1e-3 à 10.0) : Régularisation L1
+- reg_lambda (1e-3 à 10.0) : Régularisation L2
+
+5.2 VALIDATION CROISÉE TEMPORELLE
+----------------------------------
+
+- Méthode : TimeSeriesSplit avec 5 folds (validation "walk-forward")
+- Respecte l'ordre temporel (pas d'information future dans la validation)
+- Objectif : Minimiser le RMSE sur les folds de validation
+- Échantillonnage : 50% des données d'entraînement (pour la rapidité)
+
+5.3 PROCESSUS D'OPTIMISATION
+-----------------------------
+
+- Outil : Optuna avec TPESampler (optimisation bayésienne)
+- Nombre d'essais : Configurable (défaut : 2 par dataset)
+- Pruning : MedianPruner arrête les essais non prometteurs
+- Parallélisation : 2 workers maximum pour optimiser plusieurs datasets
+- Résultat : Meilleurs hyperparamètres pour chaque dataset, sauvegardés en JSON
+
+================================================================================
+6. PHASE 4 : ENTRAÎNEMENT DES MODÈLES (training/)
+================================================================================
+
+Entraîne les modèles finaux avec les hyperparamètres optimisés.
+
+6.1 PROCESSUS D'ENTRAÎNEMENT
+-----------------------------
+
+- Chargement des hyperparamètres optimaux (depuis le JSON)
+- Entraînement sur l'intégralité du set d'entraînement (80% des données)
+- Pas de split de validation (déjà fait lors de l'optimisation)
+- Calcul du RMSE sur le train pour vérification
+
+6.2 SAUVEGARDE
+--------------
+
+Pour chaque modèle :
+- Fichier .joblib : Modèle sérialisé
+- Fichier JSON : Métadonnées (hyperparamètres, RMSE train, taille dataset,
+                 nombre de features, random state)
+
+6.3 PARALLÉLISATION
+-------------------
+
+- Entraînement simultané de plusieurs modèles (2 workers)
+- Un modèle par variante de dataset
+
+================================================================================
+7. PHASE 5 : ÉVALUATION ET INTERPRÉTABILITÉ (eval/)
+================================================================================
+
+Évalue les modèles sur le set de test (jamais vu pendant entraînement/optimisation)
+et fournit des outils d'interprétabilité.
+
+7.1 MÉTRIQUES DE PERFORMANCE
+-----------------------------
+
+Calcul sur le set de test (20% des données, dates les plus récentes) :
+- MAE (Mean Absolute Error) : Erreur moyenne absolue
+- MSE (Mean Squared Error) : Erreur quadratique moyenne
+- RMSE (Root Mean Squared Error) : Racine de MSE (même unité que la cible)
+- R² (coefficient de détermination) : Variance expliquée (0 à 1)
+
+7.2 ANALYSE SHAP (Interprétabilité)
+------------------------------------
+
+SHAP (SHapley Additive exPlanations) explique les prédictions du modèle :
+- Calcul des valeurs SHAP pour chaque échantillon du test
+- Visualisation : Beeswarm plots montrant :
+  * Importance relative de chaque feature
+  * Distribution de l'impact des features
+  * Contributions positives vs négatives
+- Plots haute résolution (300 DPI, 12x8 pouces)
+- Permet de comprendre quelles features le modèle utilise réellement
+
+7.3 COMPARAISON STATISTIQUE
+----------------------------
+
+- Test de Diebold-Mariano entre paires de modèles
+- Hypothèse nulle : "les deux modèles ont la même précision prédictive"
+- Fournit p-values et significativité statistique
+- Permet de comparer rigoureusement les différentes variantes
+
+7.4 PARALLÉLISATION
+-------------------
+
+- Évaluation simultanée de plusieurs modèles (2 workers)
+- Gestion de la mémoire avec garbage collection explicite
+
+================================================================================
+8. BASELINE RANDOM (baseline/)
+================================================================================
+
+Modèle de référence minimal pour établir un niveau de performance de base.
+
+8.1 OBJECTIF
+------------
+
+La baseline random génère des prédictions aléatoires à partir de la même
+distribution statistique que les données de test, permettant de :
+- Établir un niveau de performance minimal attendu
+- Vérifier que les modèles LightGBM apportent une valeur ajoutée
+- Fournir un point de comparaison pour les métriques
+
+8.2 MÉTHODOLOGIE
+----------------
+
+a) Chargement des données de test
+   - Filtrage du split "test" depuis le dataset
+   - Extraction des features et de la cible (log_volatility)
+   - Utilisation de la même fonction extract_features_and_target que les modèles
+
+b) Génération de prédictions aléatoires
+   - Distribution normale avec même moyenne et écart-type que y_test
+   - Utilisation de numpy.random.RandomState pour reproductibilité
+   - Seed fixé (DEFAULT_RANDOM_STATE) pour garantir la reproductibilité
+
+c) Calcul des métriques
+   - MAE, MSE, RMSE, R² (mêmes métriques que les modèles LightGBM)
+   - Calcul sur le même set de test que les modèles entraînés
+
+d) Sauvegarde des résultats
+   - Format identique aux modèles LightGBM
+   - Ajout dans le même fichier JSON (results.json)
+   - Clé "random_baseline" pour identification
+
+8.3 CARACTÉRISTIQUES
+---------------------
+
+- Aucune feature utilisée (n_features = 0)
+- Aucune importance de features (feature_importances = {})
+- Prédictions purement aléatoires (pas d'apprentissage)
+- Performance attendue : R² proche de 0 ou négatif
+
+8.4 UTILISATION
+---------------
+
+Commande pour exécuter la baseline :
+python -m src.lightgbm.baseline.main
+
+Les résultats sont automatiquement ajoutés au fichier d'évaluation principal
+pour comparaison avec les modèles LightGBM.
+
+================================================================================
+9. PRÉVENTION DE LA FUITE DE DONNÉES (DATA LEAKAGE)
+================================================================================
+
+Mesures critiques pour garantir l'intégrité temporelle :
+
+9.1 DÉCALAGE DE LA CIBLE
+-------------------------
+- Les features à la date t prédisent la cible à t+1
+- Utilisation de shift(-1) sur la colonne cible
+- La colonne de split est alignée sur les dates cibles, pas les features
+
+9.2 LAGS CORRECTS
+-----------------
+- Utilisation de shift(+lag) pour accéder uniquement aux valeurs passées
+- Groupement par ticker pour éviter la contamination inter-actions
+- Application des lags APRÈS la création de la cible
+
+9.3 SPLIT TEMPOREL
+------------------
+- Division basée sur les dates uniques (split global pour tous les tickers)
+- 80% des dates les plus anciennes = train
+- 20% des dates les plus récentes = test
+- Le split n'est jamais utilisé dans le calcul des features (uniquement filtrage)
+
+9.4 TRI DES DONNÉES
+-------------------
+- Tri systématique par [ticker, date] avant toute opération
+- Validation de l'ordre temporel à chaque étape critique
+
+================================================================================
+10. QUESTIONS DE RECHERCHE ET EXPÉRIENCES
+================================================================================
+
+Les 5 variantes de datasets permettent de répondre à :
+
+1. Les insights GARCH améliorent-ils les prédictions ?
+   → Comparer : COMPLET vs SANS INSIGHTS
+
+2. Quelle valeur ajoutent les indicateurs techniques ?
+   → Comparer : COMPLET vs SIGMA PLUS BASE
+
+3. La volatilité est-elle prédictible uniquement via son historique ?
+   → Évaluer : LOG VOLATILITY SEULEMENT
+
+4. Les insights GARCH seuls suffisent-ils ?
+   → Évaluer : INSIGHTS SEULEMENT
+
+5. Quelles features sont les plus importantes ?
+   → Analyser : Classements d'importance SHAP
+
+================================================================================
+11. POINTS D'ENTRÉE ET EXÉCUTION
+================================================================================
+
+Commandes pour exécuter le pipeline complet :
+
+# 1. Préparer les datasets (obligatoire en premier)
+python -m src.lightgbm.data_preparation.main
+
+# 2. Analyser les corrélations (optionnel)
+python -m src.lightgbm.correlation.main
+
+# 3. Optimiser les hyperparamètres
+python -m src.lightgbm.optimisation.main
+
+# 4. Entraîner les modèles avec paramètres optimisés
+python -m src.lightgbm.training.main
+
+# 5. Évaluer sur le set de test
+python -m src.lightgbm.eval.main
+
+# 6. Calculer la baseline random (optionnel, pour comparaison)
+python -m src.lightgbm.baseline.main
+
+Chaque étape est indépendante après la préparation des données, permettant
+une expérimentation itérative.
+
+================================================================================
+12. CONFIGURATION PRINCIPALE
+================================================================================
+
+Paramètres clés (dans src/constants.py) :
+
+# Splits et échantillonnage
+LIGHTGBM_TRAIN_TEST_SPLIT_RATIO = 0.8
+LIGHTGBM_OPTIMIZATION_SAMPLE_FRACTION = 0.5
+
+# Fenêtres de lags
+LIGHTGBM_LAG_WINDOWS = (1, 2, 3)
+
+# Optimisation
+LIGHTGBM_OPTIMIZATION_N_TRIALS = 2
+LIGHTGBM_OPTIMIZATION_N_SPLITS = 5
+LIGHTGBM_OPTIMIZATION_MAX_WORKERS = 2
+
+# Indicateurs techniques
+LIGHTGBM_VOL_MA_SHORT_WINDOW = 5
+LIGHTGBM_VOL_MA_LONG_WINDOW = 20
+LIGHTGBM_TURNOVER_MA_WINDOW = 5
+
+# Visualisation SHAP
+LIGHTGBM_SHAP_MAX_DISPLAY_DEFAULT = 20
+
+================================================================================
+13. POURQUOI LIGHTGBM ?
+================================================================================
+
+Choix justifié par plusieurs avantages :
+- Gère efficacement les features de haute dimension
+- Robuste aux outliers et relations non-linéaires
+- Entraînement rapide (gradient-based one-side sampling)
+- Gestion native des features catégorielles (ticker_id)
+- Performance supérieure sur les données tabulaires
+- Interprétabilité via SHAP
+
+================================================================================
+14. DÉPENDANCES ET INTERACTIONS
+================================================================================
+
+Dépendances externes :
+- src/constants.py : Configuration globale et chemins
+- src/utils/ : Logging, I/O fichiers, validation
+- src/data_preparation/ : Calcul de volatilité (étape antérieure)
+- Pipeline GARCH : Fournit sigma2_garch et features associées
+
+Flux interne :
+data_preparation → correlation (analyse)
+                 ↓
+              optimisation → training → eval
+
+================================================================================
+FIN DE LA MÉTHODOLOGIE
+================================================================================

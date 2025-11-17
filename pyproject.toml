@@ -1,0 +1,43 @@
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+exclude = [
+  "^notebook/",
+  "^SP_Forecasting/",
+  "src/.*/test_.*\\.py$",
+]
+plugins = ["numpy.typing.mypy_plugin"]
+[[tool.mypy.overrides]]
+module = "scipy.*"
+ignore_missing_imports = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+fix = true
+
+[tool.ruff.lint]
+extend-select = ["E", "F", "B"]
+ignore = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+SP_Forecasting/
+venv/
+.venv/
+ENV/
+.coverage
+coverage.json
+
+# Data
+# Ignore all files in data/
+data/*
+!data/.gitkeep
+
+# Ignore parquet files everywhere
+*.parquet
+
+# Results and plots
+# results/ and plots/ are now tracked in git
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# MyPy cache
+.mypy_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# LaTeX
+minted-cache/
+*.aux
+*.log
+*.out
+*.toc
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.tex
+*.pdf
+references.bib
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Models
+*.joblib
+*.pkl
+*.h5
