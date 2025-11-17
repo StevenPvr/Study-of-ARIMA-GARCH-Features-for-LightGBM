@@ -25,7 +25,7 @@ from src.garch.training_garch.orchestration import (
     generate_full_sample_forecasts_from_trained_model,
 )
 from src.path import DATA_TICKERS_FULL_FILE, DATA_TICKERS_FULL_INSIGHTS_FILE, GARCH_FORECASTS_FILE
-from src.utils import ensure_output_dir, get_logger
+from src.utils import ensure_output_dir, get_logger, save_parquet_and_csv
 
 logger = get_logger(__name__)
 
@@ -111,8 +111,10 @@ def forecast_on_test_from_trained_model(
     df_result: pd.DataFrame = df_renamed[["date", "resid", "RV", "sigma2_egarch_raw"]].copy()  # type: ignore[assignment]
 
     # Save results
-    ensure_output_dir(GARCH_FORECASTS_FILE)
-    df_result.to_csv(GARCH_FORECASTS_FILE, index=False)
+    if GARCH_FORECASTS_FILE.suffix.lower() != ".parquet":
+        msg = f"GARCH forecasts must be saved with a parquet base path, got: {GARCH_FORECASTS_FILE}"
+        raise ValueError(msg)
+    save_parquet_and_csv(df_result, GARCH_FORECASTS_FILE)
     logger.info("Saved %d TEST forecasts to: %s", len(df_result), GARCH_FORECASTS_FILE)
 
     return df_result
@@ -190,8 +192,10 @@ def forecast_from_artifacts(
     )
     forecasts["model_name"] = model_name
 
-    ensure_output_dir(GARCH_FORECASTS_FILE)
-    forecasts.to_csv(GARCH_FORECASTS_FILE, index=False)
+    if GARCH_FORECASTS_FILE.suffix.lower() != ".parquet":
+        msg = f"GARCH forecasts must be saved with a parquet base path, got: {GARCH_FORECASTS_FILE}"
+        raise ValueError(msg)
+    save_parquet_and_csv(forecasts, GARCH_FORECASTS_FILE)
     logger.info("Saved %d-step forecasts to: %s", horizon, GARCH_FORECASTS_FILE)
 
     return forecasts
