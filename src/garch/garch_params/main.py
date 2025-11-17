@@ -25,6 +25,8 @@ from src.constants import (
     GARCH_OPTIMIZATION_DISTRIBUTIONS,
     GARCH_OPTIMIZATION_REFIT_FREQ_OPTIONS,
     GARCH_OPTIMIZATION_RESULTS_FILE,
+    GARCH_OPTIMIZATION_ROLLING_WINDOW_SIZES,
+    GARCH_OPTIMIZATION_WINDOW_TYPES,
 )
 from src.garch.garch_params.data import load_and_prepare_data
 from src.garch.garch_params.estimation import estimate_egarch_mle
@@ -178,6 +180,39 @@ def run_optimization_stage() -> None:
 
     logger.info("=" * 60)
     logger.info("STAGE 2: EGARCH HYPERPARAMETER OPTIMIZATION")
+    order_options = (1, 2)
+    arch_options = (1, 2)
+    base_combos = (
+        len(order_options)
+        * len(arch_options)
+        * len(GARCH_OPTIMIZATION_DISTRIBUTIONS)
+        * len(GARCH_OPTIMIZATION_REFIT_FREQ_OPTIONS)
+    )
+    window_breakdown: dict[str, int] = {}
+    total_combos = 0
+    for window_type in GARCH_OPTIMIZATION_WINDOW_TYPES:
+        multiplier = 1
+        if window_type == "rolling":
+            multiplier = len(GARCH_OPTIMIZATION_ROLLING_WINDOW_SIZES)
+        window_breakdown[window_type] = base_combos * multiplier
+        total_combos += window_breakdown[window_type]
+    logger.info(
+        "Hyperparameter grid: o∈%s, p∈%s, distributions=%s, refit_freq=%s, window_types=%s",
+        order_options,
+        arch_options,
+        GARCH_OPTIMIZATION_DISTRIBUTIONS,
+        GARCH_OPTIMIZATION_REFIT_FREQ_OPTIONS,
+        GARCH_OPTIMIZATION_WINDOW_TYPES,
+    )
+    logger.info(
+        "Rolling window sizes (applies when window_type='rolling'): %s",
+        GARCH_OPTIMIZATION_ROLLING_WINDOW_SIZES,
+    )
+    logger.info(
+        "Grid size: %d combinations (%s)",
+        total_combos,
+        ", ".join(f"{name}={count}" for name, count in window_breakdown.items()),
+    )
     estimation_doc, warm_trials = _load_estimation_baselines()
     resid_train, resid_test = load_and_prepare_data()
     logger.info("Training data: %d observations", resid_train.size)

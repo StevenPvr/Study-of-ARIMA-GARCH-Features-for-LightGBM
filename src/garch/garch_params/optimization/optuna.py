@@ -34,7 +34,7 @@ logger = get_logger(__name__)
 def _create_optuna_study() -> optuna.Study:
     """Create Optuna study for minimization.
 
-    Uses RandomSampler for small discrete search spaces (144 total combinations).
+    Uses RandomSampler for the finite discrete search space (180 total combinations).
     RandomSampler is more appropriate than TPE for:
     - Small discrete search spaces
     - Categorical parameters
@@ -46,9 +46,9 @@ def _create_optuna_study() -> optuna.Study:
     Returns:
         Configured Optuna study.
     """
-    # Total combinations: expanding: o(2) * p(2) * dist(3) * refit(4) = 48
-    #                     rolling: o(2) * p(2) * dist(3) * refit(4) * size(6) = 288
-    #                     Total: 336 combinations
+    # Total combinations: expanding: o(2) * p(2) * dist(3) * refit(5) = 60
+    #                     rolling: o(2) * p(2) * dist(3) * refit(5) * size(2) = 120
+    #                     Total: 180 combinations
     # RandomSampler is better suited for discrete spaces than TPE
     # TPE is optimized for continuous spaces and may not explore discrete spaces well
     sampler = optuna.samplers.RandomSampler(seed=DEFAULT_RANDOM_STATE)

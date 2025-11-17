@@ -276,6 +276,21 @@ Principaux paramètres configurables :
 - Fenêtres de lag
 - Fréquence de refit (rolling forecasts)
 
+### Grille d'optimisation EGARCH
+
+La recherche Optuna sur les hyperparamètres EGARCH parcourt explicitement la grille
+finie suivante (également loggée lors de l'exécution) :
+
+- Ordres : o ∈ {1, 2}, p ∈ {1, 2}
+- Distributions : {normal, student, skewt}
+- Fréquences de refit : {5, 10, 20, 30, 60} jours
+- Types de fenêtre : {expanding, rolling}
+- Tailles de fenêtre rolling : {500, 1000} observations
+
+Cela représente 60 combinaisons pour les fenêtres expanding et 120 combinaisons
+pour les fenêtres rolling, soit 180 essais possibles explorés par le RandomSampler
+avec `GARCH_OPTIMIZATION_N_TRIALS`.
+
 ## 🐛 Dépannage
 
 ### Erreurs courantes

@@ -227,7 +227,7 @@ GARCH_CALIBRATION_EPS: float = 1e-12
 # GARCH hyperparameter optimization defaults
 GARCH_OPTIMIZATION_BURN_IN_RATIO: float = 0.3  # 30% of TRAIN for burn-in
 GARCH_OPTIMIZATION_MIN_VALIDATION_SIZE: int = 20  # Minimum validation window size
-GARCH_OPTIMIZATION_N_TRIALS: int = 10
+GARCH_OPTIMIZATION_N_TRIALS: int = 180
 GARCH_OPTIMIZATION_N_SPLITS: int = 5
 GARCH_OPTIMIZATION_DISTRIBUTIONS: tuple[str, ...] = (
     "normal",
@@ -235,9 +235,9 @@ GARCH_OPTIMIZATION_DISTRIBUTIONS: tuple[str, ...] = (
     "skewt",
 )
 
-GARCH_OPTIMIZATION_REFIT_FREQ_OPTIONS: tuple[int, ...] = (1, 5, 15, 21, 63)
+GARCH_OPTIMIZATION_REFIT_FREQ_OPTIONS: tuple[int, ...] = (5, 10, 20, 30, 60)
 GARCH_OPTIMIZATION_WINDOW_TYPES: tuple[str, ...] = ("expanding", "rolling")
-GARCH_OPTIMIZATION_ROLLING_WINDOW_SIZES: tuple[int, ...] = (500, 750, 1000, 1500, 2000)
+GARCH_OPTIMIZATION_ROLLING_WINDOW_SIZES: tuple[int, ...] = (500, 1000)
 
 # GARCH hyperparameter optimization - composite objective weights
 GARCH_OPTIMIZATION_QLIKE_WEIGHT: float = 0.7
