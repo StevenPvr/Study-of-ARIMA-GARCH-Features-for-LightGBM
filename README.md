@@ -149,6 +149,23 @@ python src/lightgbm/eval/main.py
 python src/lightgbm/ablation/main.py
 ```
 
+# Modes d'évaluation GARCH (`src/garch/garch_eval/main.py`)
+
+Le script d'évaluation accepte le flag `--forecast-mode` afin de sélectionner la stratégie de
+génération des prévisions plein-échantillon (TRAIN + TEST) avant calcul des métriques et
+génération du dataset LightGBM :
+
+- `no_refit` *(valeur par défaut officielle)* : appelle
+  `generate_full_sample_forecasts_from_trained_model`, réutilise les paramètres entraînés sans
+  aucun refit sur les splits TRAIN/TEST et garantit que les features exportées restent
+  cohérentes pour LightGBM.
+- `hybrid` : appelle `generate_full_sample_forecasts_hybrid`, ce qui réactive le planning de
+  refit optimisé (à utiliser uniquement en connaissance de cause, car cela réécrit les
+  features en mode refit).
+
+Le mode sélectionné est loggé en début d'exécution ainsi qu'au moment de la génération du
+fichier `data_tickers_full_insights`, ce qui permet d'auditer chaque run a posteriori.
+
 ### Tests
 
 Exécuter les tests unitaires :
