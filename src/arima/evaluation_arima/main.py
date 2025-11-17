@@ -232,7 +232,7 @@ def _run_full_series_backtest(
     test: pd.Series,
     order: tuple[int, int, int],
     refit_every: int,
-) -> pd.DataFrame | None:
+) -> pd.DataFrame:
     """Execute backtest on full series (train+test) and persist outputs.
 
     This backtest generates residuals for all dates (train+test) needed by GARCH,
@@ -240,31 +240,26 @@ def _run_full_series_backtest(
     """
     logger.info("=" * 60)
     logger.info("RUNNING FULL SERIES BACKTEST (train+test)")
-    try:
-        history = backtest_full_series(
-            train_series=train,
-            test_series=test,
-            order=order,
-            refit_every=refit_every,
-            verbose=True,
-        )
+    logger.info("Any forecasting error will abort the CLI execution.")
+    history = backtest_full_series(
+        train_series=train,
+        test_series=test,
+        order=order,
+        refit_every=refit_every,
+        verbose=True,
+    )
 
-        metrics = _compute_backtest_metrics(history)
+    metrics = _compute_backtest_metrics(history)
 
-        logger.info(
-            "Backtest metrics: MSE=%.6f | RMSE=%.6f | MAE=%.6f",
-            metrics["mse"],
-            metrics["rmse"],
-            metrics["mae"],
-        )
+    logger.info(
+        "Backtest metrics: MSE=%.6f | RMSE=%.6f | MAE=%.6f",
+        metrics["mse"],
+        metrics["rmse"],
+        metrics["mae"],
+    )
 
-        _save_backtest_results(history, metrics, refit_every)
-        return history
-
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Full series backtest could not be completed: %s", exc)
-        logger.exception(exc)
-        return None
+    _save_backtest_results(history, metrics, refit_every)
+    return history
 
 
 def _build_garch_outputs(
@@ -364,14 +359,19 @@ def main() -> None:
 
     from src.arima.evaluation_arima.evaluation_arima import backtest_full_series
 
-    backtest_history = backtest_full_series(
-        train_series=train,
-        test_series=test,
-        order=order,
-        refit_every=optimal_refit_every,
-        verbose=True,
-        trend=trend,
-    )
+    try:
+        logger.info("Running full series backtest for GARCH artifacts (errors propagate to CLI).")
+        backtest_history = backtest_full_series(
+            train_series=train,
+            test_series=test,
+            order=order,
+            refit_every=optimal_refit_every,
+            verbose=True,
+            trend=trend,
+        )
+    except RuntimeError as exc:
+        logger.error("Full series backtest failed: %s", exc)
+        raise
 
     # Extract fitted model from evaluate_model results for GARCH
     full_fitted_model = results.get("_fitted_model")

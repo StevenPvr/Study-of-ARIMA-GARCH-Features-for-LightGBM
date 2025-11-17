@@ -234,15 +234,20 @@ def _fit_arima(y: pd.Series, spec: ArimaSpec) -> Any:
 
 
 def _make_one_step_forecast(fitted_model: Any, y_train: pd.Series, step: int) -> float:
-    """Make a one-step forecast, with fallback to last observed value."""
+    """Make a one-step forecast or raise a RuntimeError if it fails."""
     try:
         forecast_result = fitted_model.forecast(steps=1)  # type: ignore
         return float(
             forecast_result.iloc[0] if hasattr(forecast_result, "iloc") else forecast_result[0]
         )
-    except Exception as e:
-        logger.warning(f"Forecast failed at step {step+1}, using last observed value: {e}")
-        return float(y_train.iloc[-1])
+    except Exception as exc:
+        logger.error(
+            "One-step forecast failed at step %s (train_length=%s): %s",
+            step + 1,
+            len(y_train),
+            exc,
+        )
+        raise RuntimeError(f"One-step forecast failed at step {step + 1}: {exc}") from exc
 
 
 # ----------------------------- Core API ----------------------------- #
@@ -321,7 +326,15 @@ def rolling_forecast(
         Actual values from test_series.
     """
     y_train, y_test, spec = _setup_rolling_forecast(train_series, test_series, order, trend)
-    preds, actuals = _execute_rolling_forecast_loop(y_train, y_test, spec, refit_every, verbose)
+    try:
+        preds, actuals = _execute_rolling_forecast_loop(
+            y_train, y_test, spec, refit_every, verbose
+        )
+    except RuntimeError as exc:
+        logger.error(
+            "Rolling forecast aborted due to a forecasting failure; propagating error to CLI."
+        )
+        raise RuntimeError("Rolling forecast failed during evaluation.") from exc
     return np.array(preds, dtype=float), np.array(actuals, dtype=float)
 
 
@@ -956,7 +969,15 @@ def backtest_full_series(
     # _ensure_datetime_index may not always set frequency correctly, so we ensure it here
     y_full = _ensure_frequency(y_full)
 
-    preds, actuals = _run_backtest_loop(y_full, spec, min_train_size, refit_every, verbose)
+    try:
+        preds, actuals = _run_backtest_loop(
+            y_full, spec, min_train_size, refit_every, verbose
+        )
+    except RuntimeError as exc:
+        logger.error(
+            "Full-series backtest aborted because a single-step forecast failed; propagating error."
+        )
+        raise RuntimeError("Full-series backtest failed.") from exc
 
     # Compute residuals
     residuals = np.array(actuals) - np.array(preds)
@@ -1010,14 +1031,20 @@ def evaluate_model(
     if SARIMAX is None:  # pragma: no cover
         raise RuntimeError("statsmodels is required for SARIMAX.")
 
-    preds_array, actuals_array = rolling_forecast(
-        train_series=train_series,
-        test_series=test_series,
-        order=order,
-        refit_every=refit_every,
-        verbose=verbose,
-        trend=trend,
-    )
+    try:
+        preds_array, actuals_array = rolling_forecast(
+            train_series=train_series,
+            test_series=test_series,
+            order=order,
+            refit_every=refit_every,
+            verbose=verbose,
+            trend=trend,
+        )
+    except RuntimeError as exc:
+        logger.error(
+            "Rolling forecast failed while evaluating the ARIMA model; propagating to CLI."
+        )
+        raise RuntimeError("ARIMA evaluation aborted because rolling forecast failed.") from exc
 
     preds = np.asarray(preds_array, dtype=float)
     actuals = np.asarray(actuals_array, dtype=float)

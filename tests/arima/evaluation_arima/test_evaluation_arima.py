@@ -21,6 +21,7 @@ if str(_project_root) not in sys.path:
 from src.utils.metrics import compute_residuals
 
 from src.arima.evaluation_arima.evaluation_arima import (
+    _make_one_step_forecast,
     anderson_darling_test,
     calculate_metrics,
     evaluate_model,
@@ -91,7 +92,7 @@ class TestRollingForecast:
         mock_logger: MagicMock,
         mock_sarimax: MagicMock,
     ) -> None:
-        """Test rolling forecast with forecast failures (fit succeeds, forecast fails)."""
+        """Ensure rolling_forecast propagates forecast failures."""
         train_series = pd.Series(
             [0.01, -0.02, 0.015] * 10,
             index=pd.date_range("2020-01-01", periods=30, freq="D"),
@@ -122,20 +123,32 @@ class TestRollingForecast:
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=FutureWarning, module="statsmodels")
             warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")
-            predictions, actuals = rolling_forecast(
-                train_series,
-                test_series,
-                order=(1, 0, 1),
-                refit_every=20,
-                verbose=False,
-            )
+            with pytest.raises(RuntimeError, match="Rolling forecast failed"):
+                rolling_forecast(
+                    train_series,
+                    test_series,
+                    order=(1, 0, 1),
+                    refit_every=20,
+                    verbose=False,
+                )
 
-        # Verify
-        assert len(predictions) == len(test_series)
-        assert len(actuals) == len(test_series)
-        # First prediction should use last observed value (fallback)
-        # Second prediction should use forecast value
-        assert all(not np.isnan(p) for p in predictions)
+    @patch("src.arima.evaluation_arima.evaluation_arima.logger")
+    def test_make_one_step_forecast_raises_runtime_error(
+        self,
+        mock_logger: MagicMock,
+    ) -> None:
+        """Ensure _make_one_step_forecast raises RuntimeError when forecast fails."""
+        fitted_model = MagicMock()
+        fitted_model.forecast.side_effect = ValueError("boom")
+        train_series = pd.Series(
+            [0.1, 0.2, 0.3],
+            index=pd.date_range("2020-01-01", periods=3, freq="D"),
+        )
+
+        with pytest.raises(RuntimeError, match="One-step forecast failed at step 1"):
+            _make_one_step_forecast(fitted_model, train_series, 0)
+
+        mock_logger.error.assert_called()
 
     @patch("src.arima.evaluation_arima.evaluation_arima.SARIMAX")
     @patch("src.arima.evaluation_arima.evaluation_arima.logger")
